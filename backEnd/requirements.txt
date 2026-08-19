@@ -1,0 +1,32 @@
+# --- Core Server & API ---
+fastapi
+uvicorn[standard]
+python-multipart
+aiofiles
+jinja2
+python-dotenv
+pydantic-settings
+
+# --- Primary PDF & Doc Processing ---
+pymupdf
+pdf2docx
+pdfplumber
+pypdf
+python-docx
+reportlab
+pdfminer.six
+
+# --- AI, Automation & Web ---
+openai
+playwright
+requests
+beautifulsoup4
+
+# --- Data Processing & Excel ---
+pandas
+openpyxl
+numpy
+
+# --- Image Processing ---
+Pillow
+pdfservices-sdk

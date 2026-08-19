@@ -1,0 +1,653 @@
+/* ==========================================================================
+   Premium 2026 UI Token Variables
+   ========================================================================== */
+:root {
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  
+  /* Brand Palettes */
+  --color-bg: #fdfdfd;
+  --color-surface: #ffffff;
+  --color-text-main: #09090b;
+  --color-text-muted: #71717a;
+  
+  --pdf-primary: #ef4444;
+  --pdf-primary-hover: #dc2626;
+  --pdf-light: #fef2f2;
+  
+  --premium-gold: #f59e0b;
+  --premium-orange: #ea580c;
+  
+  /* Shared Aesthetics */
+  --radius-card: 20px;
+  --radius-btn: 12px;
+  --ease-premium: cubic-bezier(0.16, 1, 0.3, 1); /* Ultra-smooth out-quintic */
+  --shadow-subtle: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+  --shadow-premium: 0 10px 30px -10px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+/* Global Container Optimization */
+.app-container {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg);
+  color: var(--color-text-main);
+  min-height: 100vh;
+  letter-spacing: -0.01em;
+  overflow-x: hidden;
+}
+
+/* Add this to Home.css */
+img {
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  -moz-user-drag: none;
+  -o-user-drag: none;
+  user-drag: none;
+  
+  /* Prevents the long-press popup menu on mobile */
+  -webkit-touch-callout: none;
+  
+  /* Prevents highlighting the image */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ==========================================================================
+   Navigation Bar (Glassmorphism Concept)
+   ========================================================================== */
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  backdrop-filter: blur(12px);
+  background-color: rgba(255, 255, 255, 0.8);
+  border-bottom: 1px solid rgba(9, 9, 11, 0.05) !important;
+  transition: all 0.3s var(--ease-premium);
+}
+
+.nav-links a {
+  position: relative;
+  font-size: 0.95rem;
+  text-decoration: none;
+}
+
+.nav-links a::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  transform: scaleX(0);
+  height: 2px;
+  bottom: -4px;
+  left: 0;
+  background-color: var(--pdf-primary);
+  transform-origin: bottom right;
+  transition: transform 0.25s var(--ease-premium);
+}
+
+.nav-links a:hover::after {
+  transform: scaleX(1);
+  transform-origin: bottom left;
+}
+
+/* ==========================================================================
+   Hero Section & Typography
+   ========================================================================== */
+.hero-section {
+  position: relative;
+  background: radial-gradient(circle at 50% 0%, rgba(239, 68, 68, 0.04) 0%, transparent 60%),
+              linear-gradient(to bottom, #f9fafb, #ffffff);
+  border-bottom: 1px solid rgba(9, 9, 11, 0.03);
+}
+
+.hero-section h1 {
+  line-height: 1.1;
+}
+
+/* Premium Gradient Text */
+.bg-clip-text {
+  background-size: 200% auto;
+  animation: textShine 6s linear infinite;
+}
+
+@keyframes textShine {
+  0% { background-position: 0% center; }
+  50% { background-position: 100% center; }
+  100% { background-position: 0% center; }
+}
+
+/* ==========================================================================
+   Bento Tools Grid System
+   ========================================================================== */
+.tools-wrapper {
+  animation: fadeInUp 0.8s var(--ease-premium);
+}
+
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 24px;
+  padding: 12px 0;
+}
+
+@media (min-width:666px){
+  .tools-grid {
+  padding: 80px 0;
+}
+}
+
+/* The Core Premium Card Module */
+.tool-card {
+  position: relative;
+  background: var(--color-surface);
+  border: 1px solid rgba(9, 9, 11, 0.07);
+  border-radius: var(--radius-card);
+  padding: 28px;
+  box-shadow: var(--shadow-subtle);
+  overflow: hidden;
+  display: flex;
+  flex-col: column;
+  transition: transform 0.4s var(--ease-premium), 
+              box-shadow 0.4s var(--ease-premium), 
+              border-color 0.4s var(--ease-premium);
+}
+
+/* Spotlight Hover Effect via Javascript CSS Variables */
+.tool-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: radial-gradient(350px circle at var(--x, 0px) var(--y, 0px), rgba(239, 68, 68, 0.05), transparent 80%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.tool-card:hover::before {
+  opacity: 1;
+}
+
+.tool-card:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--shadow-premium);
+  border-color: rgba(9, 9, 11, 0.15);
+}
+
+/* Card Content Typography */
+.tool-card h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text-main);
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.tool-card p {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  flex-grow: 1;
+}
+
+/* Dynamic Interactive Icons styling */
+.tool-card .icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  transition: transform 0.3s var(--ease-premium);
+  background: #f4f4f5;
+  color: #3f3f46;
+}
+
+.tool-card:hover .icon {
+  transform: scale(1.08) rotate(-2deg);
+}
+
+/* Custom Tool Colors */
+.icon.merge { background: #fef2f2; color: #ef4444; }
+.icon.split { background: #f0fdf4; color: #22c55e; }
+.icon.compress { background: #eff6ff; color: #3b82f6; }
+.icon.word { background: #faf5ff; color: #a855f7; }
+.icon.ppt { background: #fff7ed; color: #f97316; }
+.icon.edit { background: #f0fdfa; color: #0d9488; }
+.icon.jpg { background: #fff1f2; color: #f43f5e; }
+
+/* Premium Pro Variant Style Card */
+.tool-card.premium-card {
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.4) 0%, #ffffff 100%);
+}
+.tool-card.premium-card::before {
+  background: radial-gradient(350px circle at var(--x, 0px) var(--y, 0px), rgba(245, 158, 11, 0.08), transparent 80%);
+}
+.tool-card.premium-card:hover {
+  border-color: rgba(245, 158, 11, 0.6);
+}
+
+/* Floating Badges */
+.badge {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #f4f4f5;
+  color: #18181b;
+}
+
+.badge.premium {
+  background: linear-gradient(135deg, var(--premium-gold), var(--premium-orange));
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.2);
+}
+
+/* ==========================================================================
+   Inputs & File Processing UX
+   ========================================================================== */
+.merge-btn {
+  background: var(--pdf-primary);
+  border-radius: var(--radius-btn);
+  transition: all 0.2s var(--ease-premium);
+}
+
+.merge-btn:hover:not(:disabled) {
+  background: var(--pdf-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+}
+
+.merge-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Micro Animations */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(15px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ==========================================================================
+   Premium Modal / Overlay UI
+   ========================================================================== */
+
+/* Make the tool card highly clickable now that it opens a modal */
+.tool-card.cursor-pointer {
+  cursor: pointer;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(9, 9, 11, 0.35); /* Dark transparent background */
+  backdrop-filter: blur(10px); /* Glassmorphism blur */
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeInOverlay 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.modal-container {
+  background-color: var(--color-surface);
+  width: 100%;
+  max-width: 480px;
+  border-radius: 28px;
+  padding: 32px;
+  box-shadow: 
+    0 25px 50px -12px rgba(0, 0, 0, 0.25), 
+    0 0 0 1px rgba(9, 9, 11, 0.05); /* Soft inner border */
+  animation: slideUpModal 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+/* Custom Scrollbar for the file list */
+.file-preview::-webkit-scrollbar {
+  width: 6px;
+}
+.file-preview::-webkit-scrollbar-track {
+  background: transparent;
+}
+.file-preview::-webkit-scrollbar-thumb {
+  background-color: #d4d4d8;
+  border-radius: 10px;
+}
+
+/* Animations */
+@keyframes fadeInOverlay {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUpModal {
+  from { 
+    opacity: 0; 
+    transform: translateY(30px) scale(0.96); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0) scale(1); 
+  }
+}
+
+/* ==========================================
+   PREMIUM MERGE PDF MODAL & PROGRESS BAR
+========================================== */
+
+.modal-body {
+  position: relative;
+  animation: premiumModalEnter .45s cubic-bezier(.16,1,.3,1);
+}
+
+/* Upload Area Interactions */
+.modal-body label {
+  transition: all 0.3s ease;
+}
+
+.modal-body label:hover:not(.pointer-events-none) {
+  transform: translateY(-2px);
+}
+
+.modal-body .relative {
+  box-shadow:
+    0 10px 40px rgba(239, 68, 68, 0.05),
+    inset 0 1px 0 rgba(255,255,255,0.8);
+}
+
+/* Floating Glow Background */
+.modal-body .absolute.blur-3xl {
+  animation: pulseGlow 6s infinite ease-in-out;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { transform: scale(1); opacity: .4; }
+  50% { transform: scale(1.2); opacity: .7; }
+}
+
+/* Upload Icon Bounce */
+.modal-body .w-20.h-20 {
+  transition: all .35s cubic-bezier(.16,1,.3,1);
+}
+
+.modal-body label:hover:not(.pointer-events-none) .w-20.h-20 {
+  transform: translateY(-4px) scale(1.05);
+  box-shadow: 0 15px 35px rgba(239,68,68,.18);
+}
+
+/* Custom File List Scrollbar */
+.modal-body .max-h-56 {
+  scrollbar-width: thin;
+  scrollbar-color: #ef4444 transparent;
+}
+.modal-body .max-h-56::-webkit-scrollbar {
+  width: 6px;
+}
+.modal-body .max-h-56::-webkit-scrollbar-track {
+  background: transparent;
+}
+.modal-body .max-h-56::-webkit-scrollbar-thumb {
+  background: #fca5a5;
+  border-radius: 10px;
+}
+.modal-body .max-h-56::-webkit-scrollbar-thumb:hover {
+  background: #ef4444;
+}
+
+/* File Card Hover State */
+.modal-body .group {
+  transition: all .3s cubic-bezier(.16,1,.3,1);
+}
+.modal-body .group:hover {
+  transform: translateY(-2px);
+  background: #ffffff;
+  box-shadow: 0 10px 25px rgba(0,0,0,.05);
+  border-color: #fecaca;
+}
+
+/* PDF Icon Micro-Interaction */
+.modal-body .group .w-10 {
+  transition: all .3s ease;
+}
+.modal-body .group:hover .w-10 {
+  transform: scale(1.1) rotate(-3deg);
+  background: #fee2e2;
+}
+
+/* Main Button Shine Effect */
+.modal-body button:last-child {
+  position: relative;
+  overflow: hidden;
+}
+.modal-body button:last-child::before {
+  content: '';
+  position: absolute;
+  top: 0; left: -120%;
+  width: 120%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.3), transparent);
+  transition: .8s ease;
+}
+.modal-body button:last-child:hover:not(:disabled)::before {
+  left: 120%;
+}
+.modal-body button:last-child:hover:not(:disabled) {
+  transform: translateY(-3px);
+}
+.modal-body button:last-child:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* ==========================================
+   THE PROGRESS BAR UI
+========================================== */
+
+/* Fade-in Utility */
+.fade-in {
+  animation: fadeInSoft 0.4s ease forwards;
+}
+
+@keyframes fadeInSoft {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Track styling */
+.progress-track {
+  backdrop-filter: blur(8px);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+}
+
+/* Bar Fill Animation (Simulated progress to 95%) */
+.progress-fill {
+  width: 0%;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+  animation: simulateUpload 3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Shimmer Light passing over the progress bar */
+.progress-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmerMove 1.5s infinite linear;
+}
+
+/* Animated Percentage Number Trick */
+.loading-percentage::after {
+  content: '0%';
+  animation: counterUp 3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Keyframes */
+@keyframes simulateUpload {
+  0% { width: 0%; }
+  30% { width: 45%; }
+  60% { width: 75%; }
+  100% { width: 95%; } /* Holds at 95% until backend resolves */
+}
+
+@keyframes counterUp {
+  0% { content: '0%'; }
+  10% { content: '14%'; }
+  20% { content: '28%'; }
+  30% { content: '45%'; }
+  50% { content: '62%'; }
+  70% { content: '81%'; }
+  90% { content: '91%'; }
+  100% { content: '95%'; }
+}
+
+@keyframes shimmerMove {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes premiumModalEnter {
+  from { opacity: 0; transform: translateY(20px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes blob {
+            0% { transform: translate(0px, 0px) scale(1); }
+            33% { transform: translate(30px, -50px) scale(1.1); }
+            66% { transform: translate(-20px, 20px) scale(0.9); }
+            100% { transform: translate(0px, 0px) scale(1); }
+          }
+          .animate-blob {
+            animation: blob 7s infinite;
+          }
+          .animation-delay-2000 {
+            animation-delay: 2s;
+          }
+          .animation-delay-4000 {
+            animation-delay: 4s;
+          }
+          .bg-size-200 {
+            background-size: 200% 200%;
+          }
+          @keyframes gradient-shift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+          }
+          .animate-gradient-shift {
+            animation: gradient-shift 4s ease infinite;
+          }
+        
+/* --- 1. The Sticky Fix (Crucial) --- */
+/* If any parent has overflow-hidden, sticky breaks. 'clip' hides overflow but keeps sticky working! */
+html, body, #root, .app-container {
+  overflow-x: clip !important; 
+}
+
+/* --- 2. Mobile Sticky Stacking Cards --- */
+@media (max-width: 665px) {
+  /* Guarantee wrappers aren't secretly restricting overflow */
+  .tools-wrapper {
+    overflow: visible !important;
+  }
+
+  .tools-grid {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0; 
+    overflow: visible !important;
+  }
+  
+  .tools-grid article {
+    position: -webkit-sticky !important; /* Required for Safari */
+    position: sticky !important;
+    align-self: flex-start; /* Prevents flexbox from stretching the item */
+    
+    width: 100%;
+    margin-bottom: 2rem; 
+    background-color: #ffffff; /* Ensures you can't see the text of the card underneath */
+    
+    box-shadow: 0 -15px 30px rgba(0, 0, 0, 0.05) !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.8);
+  }
+
+  /* Stack heights and strict Z-indexes.
+    Using 15px intervals ensures all 12 cards fit on smaller mobile screens 
+    without pushing the bottom cards off-screen.
+  */
+  .tools-grid article:nth-child(1)  { top: 80px;  z-index: 10; }
+  .tools-grid article:nth-child(2)  { top: 95px;  z-index: 11; }
+  .tools-grid article:nth-child(3)  { top: 110px; z-index: 12; }
+  .tools-grid article:nth-child(4)  { top: 125px; z-index: 13; }
+  .tools-grid article:nth-child(5)  { top: 140px; z-index: 14; }
+  .tools-grid article:nth-child(6)  { top: 155px; z-index: 15; }
+  .tools-grid article:nth-child(7)  { top: 170px; z-index: 16; }
+  .tools-grid article:nth-child(8)  { top: 185px; z-index: 17; }
+  .tools-grid article:nth-child(9)  { top: 200px; z-index: 18; }
+  .tools-grid article:nth-child(10) { top: 215px; z-index: 19; }
+  .tools-grid article:nth-child(11) { top: 230px; z-index: 20; }
+  .tools-grid article:nth-child(12) { top: 245px; z-index: 21; }
+  .tools-grid article:nth-child(13) { top: 260px; z-index: 22; }
+  .tools-grid article:nth-child(14) { top: 275px; z-index: 23; }
+}
+
+  .mobile-fullscreen-modal h2 {
+    font-size: 20px;
+  }
+
+    .mobile-fullscreen-modal h3 {
+    font-size: 17px;
+  }
+
+      .mobile-fullscreen-modal label {
+    font-size: 12px;
+  }
+
+        .mobile-fullscreen-modal select  {
+    font-size: 12px;
+  }
+
+@media (max-width: 450px), (max-height: 680px) {
+  /* KEEP THIS: This makes sure your modal looks good and scrolls internally on mobile */
+  .mobile-fullscreen-modal {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+    border: none !important;
+    padding: 2rem !important; 
+    overflow-y: hidden !important; /* Lets the modal itself scroll */
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mobile-fullscreen-modal h2 {
+    font-size: 17px;
+  }
+
+    .mobile-fullscreen-modal h3 {
+    font-size: 14px;
+  }
+
+  .ss {
+  display: none;
+}
+}
+
+.imageCenter {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto;
+  margin-bottom: 1rem;
+}

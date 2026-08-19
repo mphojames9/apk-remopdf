@@ -1,0 +1,8 @@
+input, textarea {
+    border-radius: 5px;
+    box-shadow: none;
+}
+
+.radius {
+    border-radius: 2px;
+}
