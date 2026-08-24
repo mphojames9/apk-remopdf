@@ -1,0 +1,31 @@
+/* --- Modern Premium Scrollbar (Global) --- */
+
+/* 1. Target Firefox globally */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent; /* tailwind slate-300 */
+}
+
+/* 2. Target Chrome, Edge, and Safari globally */
+::-webkit-scrollbar {
+  width: 6px;  /* Vertical scrollbar width */
+  height: 6px; /* Horizontal scrollbar height */
+}
+
+/* The track (background) */
+::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px; /* Adds a little breathing room at the top/bottom */
+}
+
+/* The draggable thumb */
+::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1; /* tailwind slate-300 */
+  border-radius: 10px;
+  transition: background-color 0.3s ease;
+}
+
+/* Hover state for the thumb */
+::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8; /* tailwind slate-400 */
+}

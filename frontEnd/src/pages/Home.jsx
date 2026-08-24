@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { mergePdfs, splitPdf, compressPdf, imagesToPdf, pdfToImages, getPdfPreviews, removePdfPages, compressImages, pdfToWord, pdfToExcel, addPasswordToPdf, verifyPdfPassword, removePdfPassword, changePdfPassword, pdfToPpt } from '../api/client';
 import './Home.css';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 import Navbar from '../components/Navbar';
 import { toast } from '../components/PremiumToast';
 import image1 from '../assets/image1.png';
@@ -26,13 +27,15 @@ export default function Home() {
   // Premium Pricing States
   const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
   const [isAnnual, setIsAnnual] = useState(true);
-
+const [isQrScannerModalOpen, setIsQrScannerModalOpen] = useState(false);
+const [qrResult, setQrResult] = useState('');
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0); 
   const [isChangeDragActive, setIsChangeDragActive] = useState(false);
   const [isPptDragActive, setIsPptDragActive] = useState(false);
   const [isUnlockDragActive, setIsUnlockDragActive] = useState(false);
+  const [copied, setCopied] = useState(false);
   
   // Modal states
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
@@ -138,7 +141,31 @@ export default function Home() {
     return () => window.removeEventListener('openToolModal', handleOpenModal);
   }, []);
 
+useEffect(() => {
+  if (isQrScannerModalOpen) {
+    const scanner = new Html5QrcodeScanner("qr-reader", { 
+      qrbox: { width: 250, height: 250 }, 
+      fps: 10,
+      // Prefer facing mode 'environment' (back camera) on Android devices
+      videoConstraints: { facingMode: { exact: "environment" } } 
+    });
+    
+scanner.render(
+  (decodedText) => {
+    setQrResult(decodedText);
+    toast.success("QR Code scanned successfully!");
+    // Removed scanner.clear() so the camera stays active
+  },
+  (error) => {
+    // Handle background scanning errors
+  }
+);
 
+    return () => {
+      scanner.clear().catch(console.error);
+    };
+  }
+}, [isQrScannerModalOpen]);
 
   // Comprehensive list of document tools
 const documentTools = [
@@ -577,6 +604,7 @@ const handlePdfToPpt = async () => {
     setPdfToPptFiles([]);
     setPptProtectedError(null);
     setIsPricingModalOpen(false);
+    setIsQrScannerModalOpen(false)
     
   };
 
@@ -959,6 +987,73 @@ onClick={() => navigate('/ResumeBuilder')}
   {/* Subtle "Not Active Yet" Overlay Pattern */}
   <div className="absolute inset-0 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(245,158,11,0.02)_10px,rgba(245,158,11,0.02)_20px)] pointer-events-none opacity-50 z-20"></div>
 </article>
+
+<article 
+  className="group relative overflow-hidden rounded-[2.5rem] bg-white p-8 border border-gray-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_-10px_rgba(20,184,166,0.25)] hover:-translate-y-2 transition-all duration-500 cursor-pointer flex flex-col min-h-[280px]"
+  onClick={() => { setIsQrScannerModalOpen(true); setQrResult(''); }}
+>
+  <div className="absolute -right-16 -top-16 w-48 h-48 bg-teal-400 rounded-full mix-blend-multiply filter blur-[70px] opacity-0 group-hover:opacity-15 transition-opacity duration-500"></div>
+  <div className="relative z-10 flex-1">
+    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-50 to-teal-100/50 text-teal-500 flex items-center justify-center text-2xl mb-6 shadow-inner border border-teal-200/50 group-hover:scale-110 group-hover:-rotate-3 transition-all duration-500">
+      <i className="fa-solid fa-qrcode"></i>
+    </div>
+    <h3 className="text-xl font-bold text-gray-900 mb-3 group-hover:text-teal-600 transition-colors duration-300">QR Scanner</h3>
+    <p className="text-gray-500 text-sm leading-relaxed mb-6">Scan QR codes instantly using your device camera or upload an image.</p>
+  </div>
+  <div className="absolute bottom-6 right-6 opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-400 ease-out z-20">
+    <div className="flex items-center gap-2 bg-teal-500 text-white px-4 py-2 rounded-full text-xs font-bold shadow-[0_4px_15px_rgba(20,184,166,0.3)] hover:bg-teal-600 transition-all duration-300">
+      Open Tool <i className="fa-solid fa-arrow-right -rotate-45 group-hover:rotate-0 transition-transform duration-300"></i>
+    </div>
+  </div>
+</article>
+
+<article 
+      onClick={() => navigate('/Workspace')}
+      className="group relative overflow-hidden rounded-[2.5rem] bg-white p-8 border border-slate-200 shadow-sm hover:shadow-xl hover:border-blue-200 cursor-pointer transition-all duration-300 w-full max-w-sm"
+    >
+      {/* Subtle background gradient on hover */}
+      <div className="absolute inset-0 bg-gradient-to-br from-blue-50/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+      
+      {/* Card Content */}
+      <div className="relative z-10 flex flex-col h-full gap-6">
+        
+        {/* Icon Container */}
+        <div className="w-16 h-16 bg-slate-50 group-hover:bg-blue-600 rounded-2xl flex items-center justify-center transition-colors duration-300 shadow-inner">
+          <svg 
+            className="w-8 h-8 text-slate-400 group-hover:text-white transition-colors duration-300" 
+            fill="none" 
+            stroke="currentColor" 
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+          </svg>
+        </div>
+        
+        {/* Text */}
+        <div>
+          <h3 className="text-2xl font-black text-slate-800 mb-2 group-hover:text-blue-900 transition-colors">
+            Open Workspace
+          </h3>
+          <p className="text-sm font-medium text-slate-500 leading-relaxed">
+            Access your central dashboard to start building, editing, and managing your documents.
+          </p>
+        </div>
+
+        {/* Call to Action Arrow */}
+        <div className="mt-4 flex items-center text-sm font-bold text-slate-400 group-hover:text-blue-600 transition-colors">
+          Enter Workspace 
+          <svg 
+            className="w-4 h-4 ml-2 transform group-hover:translate-x-1.5 transition-transform duration-300" 
+            fill="none" 
+            stroke="currentColor" 
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+          </svg>
+        </div>
+        
+      </div>
+    </article>
 
         </div>
 
@@ -2825,6 +2920,173 @@ onClick={() => navigate('/ResumeBuilder')}
               </button>
             )}
           </>
+        )}
+      </div>
+    </div>
+  </div>
+)}
+
+{isQrScannerModalOpen && (
+  <div 
+    className="fixed inset-0 z-[100] flex items-center justify-center sm:p-6 md:p-10 bg-slate-950/60 backdrop-blur-xl transition-all duration-500 animate-in fade-in"
+    onClick={() => setIsQrScannerModalOpen(false)}
+  >
+    {/* Body Scroll Lock for iOS/Mobile */}
+    <style dangerouslySetInnerHTML={{__html: `body { overflow: hidden !important; }` }} />
+
+    <div 
+      className="relative w-full max-w-lg bg-gradient-to-b from-white via-white/95 to-slate-50/90 rounded-[2.5rem] p-6 sm:p-10 shadow-[0_50px_100px_-20px_rgba(20,184,166,0.25),inset_0_1px_1px_rgba(255,255,255,0.8),0_0_1px_1px_rgba(20,184,166,0.1)] border border-white/80 overflow-hidden transform transition-all duration-500 animate-in fade-in zoom-in-[0.95] slide-in-from-bottom-8 ease-[cubic-bezier(0.34,1.56,0.64,1)] mobile-fullscreen-modal select-none" 
+      style={{ perspective: '1000px' }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* 3D Ambient Holographic Glows */}
+      <div className="absolute -top-32 -right-32 w-64 h-64 bg-gradient-to-br from-teal-400 to-emerald-500 rounded-full mix-blend-multiply filter blur-[90px] opacity-25 pointer-events-none animate-pulse"></div>
+      <div className="absolute -bottom-32 -left-32 w-64 h-64 bg-gradient-to-tr from-cyan-400 to-teal-400 rounded-full mix-blend-multiply filter blur-[90px] opacity-20 pointer-events-none"></div>
+
+      {/* Header */}
+      <div className="relative z-10 flex justify-between items-center mb-8">
+        <h2 className="text-2xl sm:text-3xl font-black text-slate-900 flex items-center gap-4 tracking-tight drop-shadow-sm font-sans">
+          <span className="bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-slate-800 to-teal-900">QR Scanner</span>
+        </h2>
+        <button 
+          onClick={() => setIsQrScannerModalOpen(false)} 
+          className="group w-11 h-11 cursor-pointer rounded-full bg-white hover:bg-teal-50 border border-slate-200/80 hover:border-teal-200 shadow-sm hover:shadow-md active:scale-95 transition-all duration-300 flex items-center justify-center"
+        >
+          <i className="fa-solid fa-xmark text-slate-400 group-hover:text-teal-500 group-hover:rotate-90 transition-all duration-300"></i>
+        </button>
+      </div>
+      
+      {/* Modal Content */}
+      <div className="relative z-10 flex flex-col gap-6">
+        {!qrResult ? (
+          // Active Scanner View
+          <div className="flex flex-col gap-5">
+            <div className="relative group overflow-hidden rounded-[1.5rem] bg-white border-2 border-teal-100 shadow-[0_15px_40px_-15px_rgba(20,184,166,0.15)] ring-4 ring-teal-50 transition-all duration-500 hover:border-teal-300 hover:shadow-[0_20px_50px_-15px_rgba(20,184,166,0.25)]">
+              <div className="absolute inset-0 bg-gradient-to-b from-teal-500/5 to-transparent pointer-events-none z-0"></div>
+              <div id="qr-reader" className="w-full relative z-10 [&>div]:!border-none [&>div]:!shadow-none"></div>
+            </div>
+
+            {/* Premium Image File Button */}
+            <label className="group relative w-full cursor-pointer h-14 rounded-[1.25rem] bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 border border-slate-700/50 text-white transition-all duration-500 overflow-hidden shadow-[0_10px_20px_-10px_rgba(15,23,42,0.6)] hover:shadow-[0_20px_40px_-10px_rgba(20,184,166,0.3)] hover:-translate-y-0.5 active:translate-y-0 hover:border-teal-500/50 flex items-center justify-center">
+              <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent group-hover:animate-[shimmer_1.5s_infinite] skew-x-[-20deg]"></div>
+              <div className="absolute inset-0 bg-gradient-to-r from-teal-600/20 to-emerald-600/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+              
+              <div className="relative z-10 flex items-center justify-center gap-3 tracking-wide font-extrabold text-sm w-full">
+                <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm border border-white/5 group-hover:bg-teal-500/20 group-hover:border-teal-400/30 transition-all duration-500">
+                  <i className="fa-regular fa-image text-slate-300 group-hover:text-teal-300 transition-colors duration-300"></i>
+                </div>
+                <span className="bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-300 group-hover:to-white transition-all duration-300">
+                  Scan from Image File
+                </span>
+              </div>
+
+              <input 
+                type="file" 
+                accept="image/*" 
+                className="hidden" 
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    console.log("Image selected for scanning:", file.name);
+                  }
+                }} 
+              />
+            </label>
+          </div>
+        ) : (
+          // Success Result View with Options
+          <div className="flex flex-col items-center text-center p-6 sm:p-8 rounded-[1.5rem] bg-gradient-to-b from-teal-50/80 to-white border border-teal-200/60 shadow-[0_20px_40px_-15px_rgba(20,184,166,0.12)] animate-in zoom-in-95 duration-500">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-teal-100 to-emerald-100 text-teal-600 flex items-center justify-center text-2xl sm:text-3xl mb-4 shadow-inner border border-teal-200/50">
+              <i className="fa-solid fa-check-circle animate-bounce"></i>
+            </div>
+            
+            <h3 className="text-xl font-extrabold text-slate-900 tracking-tight mb-1">Scan Successful!</h3>
+            <p className="text-slate-500 text-xs sm:text-sm mb-5 font-medium">Your QR code has been decoded successfully.</p>
+            
+            {/* Decoded Result Box */}
+            <div className="w-full bg-slate-50/90 border border-slate-200/80 p-3.5 rounded-xl text-center mb-5 shadow-inner relative group transition-all duration-300 hover:bg-white">
+              <div className="absolute inset-y-0 left-0 w-1.5 bg-teal-500 rounded-l-xl"></div>
+              <p className="text-slate-800 text-xs sm:text-sm font-semibold break-all select-all px-2 font-mono">{qrResult}</p>
+            </div>
+
+            {/* ACTION OPTIONS GRID */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 w-full mb-5">
+              {/* Open in Chrome / Browser */}
+              <button 
+                onClick={() => window.open(qrResult.startsWith('http') ? qrResult : `https://${qrResult}`, '_blank', 'noopener,noreferrer')}
+                className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl bg-white border border-slate-200/80 shadow-sm hover:border-teal-300 hover:bg-teal-50/50 hover:shadow-md active:scale-95 transition-all duration-200 cursor-pointer"
+                title="Open Link"
+              >
+                <div className="w-9 h-9 rounded-lg bg-teal-100/60 text-teal-700 flex items-center justify-center group-hover:bg-teal-500 group-hover:text-white transition-all duration-300">
+                  <i className="fa-brands fa-chrome text-base"></i>
+                </div>
+                <span className="text-[11px] font-bold text-slate-700 group-hover:text-teal-900">Open Link</span>
+              </button>
+
+              {/* Copy Link */}
+              <button 
+                onClick={() => {
+                  navigator.clipboard.writeText(qrResult);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl bg-white border border-slate-200/80 shadow-sm hover:border-emerald-300 hover:bg-emerald-50/50 hover:shadow-md active:scale-95 transition-all duration-200 cursor-pointer"
+                title="Copy to Clipboard"
+              >
+                <div className="w-9 h-9 rounded-lg bg-emerald-100/60 text-emerald-700 flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-white transition-all duration-300">
+                  <i className={`fa-solid ${copied ? 'fa-check' : 'fa-copy'} text-base`}></i>
+                </div>
+                <span className="text-[11px] font-bold text-slate-700 group-hover:text-emerald-900">
+                  {copied ? 'Copied!' : 'Copy'}
+                </span>
+              </button>
+
+              {/* Share via WhatsApp */}
+              <button 
+                onClick={() => {
+                  const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(qrResult)}`;
+                  window.open(waUrl, '_blank');
+                }}
+                className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl bg-white border border-slate-200/80 shadow-sm hover:border-emerald-300 hover:bg-emerald-50/50 hover:shadow-md active:scale-95 transition-all duration-200 cursor-pointer"
+                title="Share via WhatsApp"
+              >
+                <div className="w-9 h-9 rounded-lg bg-emerald-100/80 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-all duration-300">
+                  <i className="fa-brands fa-whatsapp text-base"></i>
+                </div>
+                <span className="text-[11px] font-bold text-slate-700 group-hover:text-emerald-900">WhatsApp</span>
+              </button>
+
+              {/* Share via Email */}
+              <button 
+                onClick={() => {
+                  const mailtoUrl = `mailto:?subject=${encodeURIComponent('Scanned QR Link')}&body=${encodeURIComponent(qrResult)}`;
+                  window.location.href = mailtoUrl;
+                }}
+                className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl bg-white border border-slate-200/80 shadow-sm hover:border-sky-300 hover:bg-sky-50/50 hover:shadow-md active:scale-95 transition-all duration-200 cursor-pointer"
+                title="Share via Email"
+              >
+                <div className="w-9 h-9 rounded-lg bg-sky-100/80 text-sky-600 flex items-center justify-center group-hover:bg-sky-500 group-hover:text-white transition-all duration-300">
+                  <i className="fa-solid fa-envelope text-base"></i>
+                </div>
+                <span className="text-[11px] font-bold text-slate-700 group-hover:text-sky-900">Email</span>
+              </button>
+            </div>
+
+            {/* Scan Another Button */}
+            <button 
+              onClick={() => { 
+                setQrResult(''); 
+                setIsQrScannerModalOpen(false); 
+                setTimeout(() => setIsQrScannerModalOpen(true), 10); 
+              }}
+              className="group relative w-full cursor-pointer h-12 rounded-[1.25rem] bg-slate-900 text-white text-sm font-bold transition-all duration-500 overflow-hidden shadow-[0_15px_30px_-10px_rgba(15,23,42,0.3)] hover:shadow-[0_20px_40px_-10px_rgba(20,184,166,0.4)] hover:-translate-y-0.5 active:translate-y-0"
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-teal-500 via-emerald-500 to-teal-500 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+              <span className="relative z-10 flex items-center justify-center gap-2.5 tracking-wide font-extrabold h-full">
+                <i className="fa-solid fa-rotate-right opacity-70 group-hover:-rotate-180 transition-transform duration-500"></i> Scan Another Code
+              </span>
+            </button>
+          </div>
         )}
       </div>
     </div>
