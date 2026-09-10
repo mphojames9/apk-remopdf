@@ -1,8 +1,8 @@
 import axios from 'axios';
 
 
-const API_URL = 'http://localhost:8000/api';
-//const API_URL = 'https://remopdf-backend.onrender.com/api';
+//const API_URL = 'http://localhost:8000/api';
+const API_URL = 'https://remopdf-backend.onrender.com/api';
 const downloadBlob = (blob, filename) => {
   const reader = new FileReader();
   reader.onloadend = () => {
@@ -311,3 +311,34 @@ export const processEditedPdf = async (file, editsJson, onProgress) => {
   return true;
 };
 
+export const scanQrCode = async (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await axios.post(`${API_URL}/tools/scan-qr`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+  
+  return response.data;
+};
+
+export const extractZipArchive = async (file, password, mode, onProgress) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('password', password);
+  formData.append('mode', mode);
+
+  // Replaced '/api/extract-zip' with the global API_URL
+  const response = await axios.post(`${API_URL}/tools/extract-zip`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: (progressEvent) => {
+      if (progressEvent.total) {
+        const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        onProgress(percent);
+      }
+    },
+    responseType: 'blob'
+  });
+
+  return response.data;
+};

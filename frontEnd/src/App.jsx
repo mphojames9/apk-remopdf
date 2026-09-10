@@ -9,6 +9,7 @@ import Contact from './pages/Contact';
 import AboutUs from './pages/AboutUs';
 import Terms from './pages/TermsOfUse';
 import Workspace from './pages/Workspace';
+import axios from 'axios'; // Add this line
 import PremiumFooter from './components/PremiumFooter';
 import ResumeHeader from './components/ResumeWelcomeHeader';
 import WhyChooseUs from './components/WhyChooseUs';
@@ -18,99 +19,13 @@ const Home = React.lazy(() => import('./pages/Home'));
 const Editor = React.lazy(() => import('./pages/Workspace'));
 
 /* ==========================================================================
-   APP LOCK MONITOR
-   ========================================================================== */
-const AppLockMonitor = ({ children }) => {
-  const [isLocked, setIsLocked] = useState(false);
-
-  useEffect(() => {
-    const verifyDate = async () => {
-      try {
-        // Check the date online using a public time API
-        const response = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC');
-        const data = await response.json();
-        
-        // Extract the YYYY-MM-DD portion
-        const currentDate = data.datetime.split('T')[0];
-        
-        if (currentDate === '2027-08-16') {
-          setIsLocked(true);
-        }
-      } catch (error) {
-        console.error('Failed to verify the date online:', error);
-        // Fallback to local time if the network request fails
-        const localDate = new Date().toISOString().split('T')[0];
-        if (localDate === '2027-08-16') {
-          setIsLocked(true);
-        }
-      }
-    };
-
-    verifyDate();
-  }, []);
-
-if (isLocked) {
-    return (
-      <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-50/80 backdrop-blur-xl font-sans p-4 animate-in fade-in duration-700">
-        <div className="relative max-w-md w-full bg-white rounded-[2.5rem] p-8 sm:p-10 shadow-[0_0_80px_-20px_rgba(249,115,22,0.15)] border border-orange-100 text-center overflow-hidden transform transition-all">
-          
-          {/* Premium Ambient Glows (Light Theme) */}
-          <div className="absolute -top-24 -right-24 w-56 h-56 bg-orange-300 rounded-full mix-blend-multiply filter blur-[80px] opacity-30 animate-pulse"></div>
-          <div className="absolute -bottom-24 -left-24 w-56 h-56 bg-amber-200 rounded-full mix-blend-multiply filter blur-[80px] opacity-40"></div>
-
-          {/* Icon Container */}
-          <div className="relative mx-auto w-24 h-24 mb-8 flex items-center justify-center group z-10">
-            <div className="absolute inset-0 bg-orange-200/50 rounded-full animate-ping opacity-60 duration-1000"></div>
-            <div className="relative w-full h-full bg-gradient-to-br from-white to-orange-50 border border-orange-100 rounded-full flex items-center justify-center shadow-inner">
-              <i className="fa-solid fa-rocket text-4xl bg-gradient-to-tr from-orange-400 to-amber-400 bg-clip-text text-transparent drop-shadow-sm"></i>
-            </div>
-          </div>
-
-          {/* Typography */}
-          <div className="relative z-10">
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mb-4">
-              Time for an Upgrade
-            </h2>
-            <p className="text-slate-500 text-sm leading-relaxed font-medium px-2 mb-8">
-              This version of the app has been retired to make way for something better. To keep enjoying the best experience, a quick update is required.
-            </p>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="relative z-10 flex flex-col gap-3">
-            <a 
-              href="https://www.remopdf.site" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="relative w-full h-14 rounded-2xl bg-gradient-to-r from-orange-400 to-orange-500 text-white text-sm font-bold shadow-[0_10px_30px_-10px_rgba(249,115,22,0.4)] hover:shadow-[0_10px_30px_-5px_rgba(249,115,22,0.6)] hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-center gap-2.5 overflow-hidden group"
-            >
-              <i className="fa-solid fa-globe text-orange-50 group-hover:rotate-12 transition-transform duration-300"></i>
-              <span>Visit www.remopdf.site</span>
-            </a>
-            
-            <div className="w-full h-14 rounded-2xl bg-orange-50/50 border border-orange-100 text-slate-600 text-sm font-medium flex items-center justify-center gap-2.5 px-4 shadow-inner">
-              <i className="fa-brands fa-google-play text-orange-400"></i>
-              <span>Check your App Store for updates</span>
-            </div>
-          </div>
-
-        </div>
-      </div>
-    );
-  }
-
-  return children;
-};
-
-/* ==========================================================================
    PREMIUM SKELETON LOADER
    ========================================================================== */
 const PageLoader = () => {
   useEffect(() => {
-    fetch('https://remopdf-backend.onrender.com/')
-      .catch((error) => {
-        console.log('Backend wake-up initiated.');
-      });
+    // Replace axios.head or fetch HEAD with GET
+axios.get('https://remopdf-backend.onrender.com/')
+  .catch((err) => console.log('Ping failed:', err));
   }, []);
 
   return (
@@ -359,18 +274,17 @@ const MainLayout = () => {
   );
 };
 
+
 /* ==========================================================================
    MAIN APPLICATION COMPONENT
    ========================================================================== */
 export default function App() {
   return (
     <GlobalErrorBoundary>
-      <AppLockMonitor>
-        <NetworkMonitor />
-        <Router>
-          <MainLayout />
-        </Router>
-      </AppLockMonitor>
+      <NetworkMonitor />
+      <Router>
+        <MainLayout />
+      </Router>
     </GlobalErrorBoundary>
   );
 }
