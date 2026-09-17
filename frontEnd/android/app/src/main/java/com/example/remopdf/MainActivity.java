@@ -28,6 +28,9 @@ import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebViewClient;
+import android.webkit.RenderProcessGoneDetail;
+import androidx.annotation.RequiresApi;
 
 // ADDED ADMOB IMPORTS
 import com.google.android.gms.ads.AdRequest;
@@ -66,6 +69,14 @@ public class MainActivity extends BridgeActivity {
 
         hideSystemUI();
         setupDownloadListener();
+
+        // Lets you inspect the WebView from Chrome on your PC (chrome://inspect)
+        // and see the REAL JavaScript error instead of a generic crash.
+        if (BuildConfig.DEBUG) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
+
+        guardAgainstRendererCrash();
     }
 
     // --- ADMOB METHODS START ---
@@ -131,6 +142,40 @@ private void setupBannerAd() {
         });
     }
     // --- ADMOB METHODS END ---
+
+    /**
+     * When the WebView renderer runs out of memory (big PDF -> many canvases),
+     * Android kills the renderer process, and by default that takes the whole app
+     * down with it -- what looks like "the app crashed". Handling it keeps the
+     * process alive and restarts the UI cleanly.
+     */
+    private void guardAgainstRendererCrash() {
+        View decorView = getWindow().getDecorView();
+        decorView.post(() -> {
+            WebView webView = getBridge().getWebView();
+            if (webView == null) return;
+            webView.setWebViewClient(new BridgeWebViewClient(getBridge()) {
+                @RequiresApi(api = Build.VERSION_CODES.O)
+                @Override
+                public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                    Log.e("WebView", "Renderer gone. didCrash=" + detail.didCrash()
+                            + " priorityAtExit=" + detail.rendererPriorityAtExit());
+                    runOnUiThread(() -> {
+                        Toast.makeText(MainActivity.this,
+                                "The viewer ran out of memory. Reloading...",
+                                Toast.LENGTH_LONG).show();
+                        Intent restart = getPackageManager().getLaunchIntentForPackage(getPackageName());
+                        if (restart != null) {
+                            restart.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+                            startActivity(restart);
+                        }
+                        finish();
+                    });
+                    return true; // handled -- do NOT let Android kill the app
+                }
+            });
+        });
+    }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {

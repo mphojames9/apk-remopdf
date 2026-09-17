@@ -17,12 +17,19 @@ from adobe.pdfservices.operation.io.stream_asset import StreamAsset
 from adobe.pdfservices.operation.pdf_services import PDFServices
 from adobe.pdfservices.operation.pdf_services_media_type import PDFServicesMediaType
 from adobe.pdfservices.operation.pdfjobs.jobs.export_pdf_job import ExportPDFJob
+from adobe.pdfservices.operation.pdfjobs.jobs.create_pdf_job import CreatePDFJob
 from adobe.pdfservices.operation.pdfjobs.params.export_pdf.export_pdf_params import ExportPDFParams
 from adobe.pdfservices.operation.pdfjobs.params.export_pdf.export_pdf_target_format import ExportPDFTargetFormat
 from adobe.pdfservices.operation.pdfjobs.result.export_pdf_result import ExportPDFResult
+from adobe.pdfservices.operation.pdfjobs.result.create_pdf_result import CreatePDFResult
 from dotenv import load_dotenv
 
+import cv2
+import numpy as np
 load_dotenv()
+from pyzbar.pyzbar import decode
+from fastapi import APIRouter, UploadFile, File, HTTPException
+from pyzbar.pyzbar import decode
 
 router = APIRouter(
     prefix="/api/tools",
@@ -529,6 +536,168 @@ async def convert_pdf_to_excel(files: List[UploadFile] = File(...)):
         print(f"Excel Conversion Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"PDF to Excel conversion failed: {str(e)}")
 
+@router.post("/word-to-pdf")
+async def convert_word_to_pdf(files: List[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(status_code=400, detail="No Word files provided.")
+
+    for file in files:
+        if not file.filename.lower().endswith((".doc", ".docx")):
+            raise HTTPException(status_code=400, detail=f"{file.filename} is not a Word document (.doc/.docx).")
+
+    try:
+        credentials = ServicePrincipalCredentials(
+            client_id=os.getenv('PDF_SERVICES_CLIENT_ID'),
+            client_secret=os.getenv('PDF_SERVICES_CLIENT_SECRET')
+        )
+        pdf_services = PDFServices(credentials=credentials)
+
+        converted_files = []  # list of (filename, pdf_bytes)
+
+        for file in files:
+            file_bytes = await file.read()
+
+            fd_pdf, temp_pdf_path = tempfile.mkstemp(suffix=".pdf")
+            os.close(fd_pdf)
+
+            try:
+                # Upload the raw Word bytes to Adobe
+                input_asset = pdf_services.upload(input_stream=file_bytes, mime_type=PDFServicesMediaType.DOCX)
+
+                # Convert to PDF
+                create_pdf_job = CreatePDFJob(input_asset=input_asset)
+                location = pdf_services.submit(create_pdf_job)
+                pdf_services_response = pdf_services.get_job_result(location, CreatePDFResult)
+
+                # Retrieve the Adobe Stream
+                result_asset: CloudAsset = pdf_services_response.get_result().get_asset()
+                stream_asset: StreamAsset = pdf_services.get_content(result_asset)
+
+                with open(temp_pdf_path, "wb") as f:
+                    f.write(stream_asset.get_input_stream())
+
+                with open(temp_pdf_path, "rb") as f:
+                    pdf_bytes = f.read()
+
+                base_name = file.filename.rsplit('.', 1)[0] if '.' in file.filename else file.filename
+                converted_files.append((f"{base_name}.pdf", pdf_bytes))
+
+            except Exception as adobe_error:
+                print(f"Adobe Engine Error on {file.filename}: {adobe_error}")
+                raise HTTPException(status_code=500, detail=f"Adobe failed to process {file.filename}.")
+            finally:
+                if os.path.exists(temp_pdf_path):
+                    os.remove(temp_pdf_path)
+
+        # Single file: hand back the PDF directly instead of a zip
+        if len(converted_files) == 1:
+            filename, pdf_bytes = converted_files[0]
+            return StreamingResponse(
+                io.BytesIO(pdf_bytes),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+
+        # Multiple files: zip them together
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for filename, pdf_bytes in converted_files:
+                zip_file.writestr(filename, pdf_bytes)
+        zip_buffer.seek(0)
+
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": "attachment; filename=RemoPDF_Word_to_PDF.zip"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Word to PDF System Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Word to PDF conversion failed: {str(e)}")
+
+@router.post("/excel-to-pdf")
+async def convert_excel_to_pdf(files: List[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(status_code=400, detail="No Excel files provided.")
+
+    for file in files:
+        if not file.filename.lower().endswith((".xls", ".xlsx")):
+            raise HTTPException(status_code=400, detail=f"{file.filename} is not an Excel spreadsheet (.xls/.xlsx).")
+
+    try:
+        credentials = ServicePrincipalCredentials(
+            client_id=os.getenv('PDF_SERVICES_CLIENT_ID'),
+            client_secret=os.getenv('PDF_SERVICES_CLIENT_SECRET')
+        )
+        pdf_services = PDFServices(credentials=credentials)
+
+        converted_files = []  # list of (filename, pdf_bytes)
+
+        for file in files:
+            file_bytes = await file.read()
+
+            fd_pdf, temp_pdf_path = tempfile.mkstemp(suffix=".pdf")
+            os.close(fd_pdf)
+
+            try:
+                # Upload the raw Excel bytes to Adobe
+                input_asset = pdf_services.upload(input_stream=file_bytes, mime_type=PDFServicesMediaType.XLSX)
+
+                # Convert to PDF
+                create_pdf_job = CreatePDFJob(input_asset=input_asset)
+                location = pdf_services.submit(create_pdf_job)
+                pdf_services_response = pdf_services.get_job_result(location, CreatePDFResult)
+
+                # Retrieve the Adobe Stream
+                result_asset: CloudAsset = pdf_services_response.get_result().get_asset()
+                stream_asset: StreamAsset = pdf_services.get_content(result_asset)
+
+                with open(temp_pdf_path, "wb") as f:
+                    f.write(stream_asset.get_input_stream())
+
+                with open(temp_pdf_path, "rb") as f:
+                    pdf_bytes = f.read()
+
+                base_name = file.filename.rsplit('.', 1)[0] if '.' in file.filename else file.filename
+                converted_files.append((f"{base_name}.pdf", pdf_bytes))
+
+            except Exception as adobe_error:
+                print(f"Adobe Engine Error on {file.filename}: {adobe_error}")
+                raise HTTPException(status_code=500, detail=f"Adobe failed to process {file.filename}.")
+            finally:
+                if os.path.exists(temp_pdf_path):
+                    os.remove(temp_pdf_path)
+
+        # Single file: hand back the PDF directly instead of a zip
+        if len(converted_files) == 1:
+            filename, pdf_bytes = converted_files[0]
+            return StreamingResponse(
+                io.BytesIO(pdf_bytes),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+
+        # Multiple files: zip them together
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for filename, pdf_bytes in converted_files:
+                zip_file.writestr(filename, pdf_bytes)
+        zip_buffer.seek(0)
+
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": "attachment; filename=RemoPDF_Excel_to_PDF.zip"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Excel to PDF System Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Excel to PDF conversion failed: {str(e)}")
+
 @router.post("/add-password")
 async def add_password_to_pdf(file: UploadFile = File(...), password: str = Form(...)):
     if not password:
@@ -740,3 +909,35 @@ async def convert_pdf_to_ppt(files: List[UploadFile] = File(...)):
     except Exception as e:
         print(f"PPT Conversion Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"PDF to PPT conversion failed: {str(e)}")
+
+@router.post("/scan-qr")
+async def scan_qr_code(file: UploadFile = File(...)):
+    try:
+        file_bytes = await file.read()
+
+        # Convert image bytes into OpenCV format
+        np_arr = np.frombuffer(file_bytes, np.uint8)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+        if img is None:
+            raise HTTPException(status_code=400, detail="Invalid or unsupported image file.")
+
+        # 1. Attempt detection with pyzbar (high accuracy)
+        decoded_objects = decode(img)
+        if decoded_objects:
+            qr_data = decoded_objects[0].data.decode("utf-8")
+            return {"success": True, "result": qr_data}
+
+        # 2. Fallback to OpenCV QRCodeDetector
+        detector = cv2.QRCodeDetector()
+        data, _, _ = detector.detectAndDecode(img)
+        if data:
+            return {"success": True, "result": data}
+
+        raise HTTPException(status_code=400, detail="No QR code could be detected in the provided image.")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"QR Scan Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process QR code: {str(e)}")

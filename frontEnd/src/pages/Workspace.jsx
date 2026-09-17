@@ -6,8 +6,12 @@ import './Workspace.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { processEditedPdf, getPdfPreviews } from '../api/client';
 
-// Using https:// prevents the CORS redirect, ${pdfjs.version} prevents the version mismatch, and .mjs loads the correct ES module.
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/legacy/build/pdf.worker.min.mjs`;
+// The worker MUST be same-origin and shipped inside the APK.
+// A CDN worker (unpkg) is cross-origin for the Capacitor WebView (https://localhost)
+// and needs live internet, so it silently fails on device -> "Setting up fake worker failed".
+// Copy node_modules/pdfjs-dist/build/pdf.worker.min.mjs into public/ as pdf.worker.min.js
+// (the .js extension guarantees a correct JS mime type from Capacitor's local server).
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
 
 export default function PdfEditor() {
   const [pdfFile, setPdfFile] = useState(null);
@@ -100,6 +104,24 @@ export default function PdfEditor() {
   };
   
   const fileInputRef = useRef(null);
+
+  // Phone screens cannot afford an 800px-wide canvas per page.
+  const [viewportWidth, setViewportWidth] = useState(
+    typeof window !== 'undefined' ? window.innerWidth : 800
+  );
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const pageWidth = Math.max(280, Math.min(800, viewportWidth - 24));
+  // Cap the render resolution: phones report devicePixelRatio 3-4, which makes
+  // every canvas 9-16x larger in memory and kills the WebView renderer process.
+  const renderDpr = typeof window !== 'undefined'
+    ? Math.min(window.devicePixelRatio || 1, 2)
+    : 1;
+  // How many pages either side of the current one get a real canvas.
+  const RENDER_WINDOW = 1;
   
   const handleImageUpload = (e) => {
     try {
@@ -170,7 +192,16 @@ const handleFileUpload = async (e) => {
       );
 
       setRawFile(uploadFile);
-      setPdfFile(arrayBuffer);
+
+      // Do NOT hand the raw ArrayBuffer to react-pdf: pdf.js transfers it to the
+      // worker, which detaches it. The second <Document> (and every re-render)
+      // then gets a zero-length buffer. A blob: URL is read-only and reusable.
+      setPdfFile((prev) => {
+        if (typeof prev === 'string' && prev.startsWith('blob:')) {
+          URL.revokeObjectURL(prev);
+        }
+        return URL.createObjectURL(uploadFile);
+      });
 
       try {
         const previewData = await getPdfPreviews([uploadFile]);
@@ -184,7 +215,12 @@ const handleFileUpload = async (e) => {
         console.error("Failed to parse PDF via backend:", err);
         showToast(`Server Error: ${err.message || JSON.stringify(err)}`);
         setRawFile(null);
-        setPdfFile(null);
+        setPdfFile((prev) => {
+          if (typeof prev === 'string' && prev.startsWith('blob:')) {
+            URL.revokeObjectURL(prev);
+          }
+          return null;
+        });
       } finally {
         setIsProcessing(false);
       }
@@ -732,6 +768,7 @@ const handleFileUpload = async (e) => {
                   <Page 
                     pageNumber={pageNum} 
                     width={140} 
+                    devicePixelRatio={1}
                     renderTextLayer={false} 
                     renderAnnotationLayer={false}
                   />
@@ -821,6 +858,8 @@ const handleFileUpload = async (e) => {
           ) : (
             <Document 
               file={pdfFile} 
+              onLoadError={(err) => showToast(`PDF load error: ${err?.message || err}`)}
+              onSourceError={(err) => showToast(`PDF source error: ${err?.message || err}`)}
               className={`flex flex-col items-start sm:items-center gap-8 pb-32 w-max sm:w-auto relative transition-all duration-500 ${(activeTool === 'place-signature' || activeTool === 'place-image') ? 'z-[50]' : 'z-0'}`} 
             >
               {Array.from({ length: totalPages }).map((_, index) => {
@@ -837,14 +876,28 @@ const handleFileUpload = async (e) => {
                       setCurrentPage(pageNum); 
                     }}
                   >
-                    <Page 
-                      pageNumber={pageNum} 
-                      width={800} 
-                      scale={zoom / 100} 
-                      renderAnnotationLayer={false}
-                      renderTextLayer={true} 
-                      className="shadow-sm"
-                    />
+                    {Math.abs(currentPage - pageNum) <= RENDER_WINDOW ? (
+                      <Page 
+                        pageNumber={pageNum} 
+                        width={pageWidth} 
+                        scale={zoom / 100} 
+                        devicePixelRatio={renderDpr}
+                        renderAnnotationLayer={false}
+                        renderTextLayer={true} 
+                        className="shadow-sm"
+                      />
+                    ) : (
+                      // Placeholder keeps scroll position stable without holding a canvas
+                      <div
+                        style={{
+                          width: pageWidth * (zoom / 100),
+                          height: pageWidth * 1.414 * (zoom / 100)
+                        }}
+                        className="flex items-center justify-center bg-white text-slate-300 text-sm font-semibold"
+                      >
+                        Page {pageNum}
+                      </div>
+                    )}
 
                     {/* Interactive overlay for adding text, image, or placing signature */}
                     {activeTool && (

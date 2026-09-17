@@ -17,6 +17,7 @@ import WhyChooseUs from './components/WhyChooseUs';
 // High-Performance Lazy Loading for Viewports
 const Home = React.lazy(() => import('./pages/Home'));
 const Editor = React.lazy(() => import('./pages/Workspace'));
+const ZipTool = React.lazy(() => import('./pages/ZipTool'));
 
 /* ==========================================================================
    PREMIUM SKELETON LOADER
@@ -216,6 +217,7 @@ class GlobalErrorBoundary extends Component {
   }
 }
 
+
 /* ==========================================================================
    MAIN LAYOUT WRAPPER 
    ========================================================================== */
@@ -243,6 +245,7 @@ const MainLayout = () => {
             <Route path="/Contact" element={<Contact />} />
             <Route path="/about" element={<AboutUs />} />
             <Route path="/terms-of-use" element={<Terms />} />
+            <Route path="/ZipTool" element={<ZipTool />} />
             
             {/* Dynamic Fallback Redirection (404 Page) */}
             <Route path="*" element={

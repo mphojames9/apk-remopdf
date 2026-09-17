@@ -191,6 +191,52 @@ export const pdfToExcel = async (files, onProgress) => {
   return true;
 };
 
+export const wordToPdf = async (files, onProgress) => {
+  const formData = new FormData();
+  files.forEach((file) => formData.append('files', file));
+
+  const response = await axios.post(`${API_URL}/tools/word-to-pdf`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    responseType: 'blob',
+    onUploadProgress: (progressEvent) => {
+      const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+      if (onProgress) onProgress(percentCompleted);
+    }
+  });
+
+  // Backend returns a single PDF when one file was sent, or a zip when converting multiple
+  const contentType = response.headers['content-type'] || '';
+  if (contentType.includes('zip')) {
+    downloadBlob(new Blob([response.data], { type: 'application/zip' }), 'RemoPDF_Word_to_PDF.zip');
+  } else {
+    downloadBlob(new Blob([response.data], { type: 'application/pdf' }), 'RemoPDF_Converted.pdf');
+  }
+  return true;
+};
+
+export const excelToPdf = async (files, onProgress) => {
+  const formData = new FormData();
+  files.forEach((file) => formData.append('files', file));
+
+  const response = await axios.post(`${API_URL}/tools/excel-to-pdf`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    responseType: 'blob',
+    onUploadProgress: (progressEvent) => {
+      const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+      if (onProgress) onProgress(percentCompleted);
+    }
+  });
+
+  // Backend returns a single PDF when one file was sent, or a zip when converting multiple
+  const contentType = response.headers['content-type'] || '';
+  if (contentType.includes('zip')) {
+    downloadBlob(new Blob([response.data], { type: 'application/zip' }), 'RemoPDF_Excel_to_PDF.zip');
+  } else {
+    downloadBlob(new Blob([response.data], { type: 'application/pdf' }), 'RemoPDF_Converted.pdf');
+  }
+  return true;
+};
+
 export const addPasswordToPdf = async (file, password, onProgress) => {
   const formData = new FormData();
   formData.append('file', file); // Single file injection
