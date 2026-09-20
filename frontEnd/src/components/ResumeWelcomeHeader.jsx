@@ -1,6 +1,7 @@
 import React from 'react';
 import officeImage from '../assets/office.png';
 import { Link } from 'react-router-dom';
+import image1 from '../assets/remopdf.png';
 
 const ExecutiveFeatureSection = ({ onNavigate }) => {
   return (

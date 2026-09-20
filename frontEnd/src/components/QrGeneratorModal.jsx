@@ -81,6 +81,17 @@ function QrGeneratorModal({ closeOverlay }) {
   const handleDownload = async () => {
     if (!qrCodeApiUrl) return;
 
+    // Inside the Android app: native code downloads the real PNG and saves it to
+    // Downloads/RemoPDF. It shows the native Android Toast itself, so we deliberately
+    // don't fire a JS toast here.
+    if (window.AndroidDownloader?.saveImageFromUrl) {
+      const nativeFileName = `qrcode-${activeTab}-${Date.now()}.png`;
+      window.AndroidDownloader.saveImageFromUrl(qrCodeApiUrl, nativeFileName);
+      setShowShareModal(true);
+      return;
+    }
+
+    // ---- Regular browser fallback (unchanged) ----
     let blob;
     try {
       const response = await fetch(qrCodeApiUrl);
@@ -132,9 +143,32 @@ function QrGeneratorModal({ closeOverlay }) {
     }
   };
 
-  const handleShare = (platform) => {
-    if (!qrDataUrl) return;
-    
+  const handleShare = async (platform) => {
+    if (!qrDataUrl || !qrCodeApiUrl) return;
+
+    const shareFileName = `qrcode-${activeTab}-${Date.now()}.png`;
+
+    // Android app: native code shares the actual PNG image (no link) through the
+    // Android share sheet. WhatsApp / Facebook open directly when installed.
+    if (window.AndroidDownloader?.shareImageFromUrl) {
+      window.AndroidDownloader.shareImageFromUrl(qrCodeApiUrl, shareFileName, platform);
+      return;
+    }
+
+    // Browser: share the actual image through the Web Share API when it supports files.
+    try {
+      const response = await fetch(qrCodeApiUrl);
+      const blob = await response.blob();
+      const file = new File([blob], shareFileName, { type: blob.type || 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'QR Code' });
+        return;
+      }
+    } catch (err) {
+      if (err?.name === 'AbortError') return; // user cancelled the share sheet
+    }
+
+    // Last resort (browsers that can't share files): fall back to sharing the link.
     const message = `Check out my QR Code link: ${qrDataUrl}`;
     const encodedMsg = encodeURIComponent(message);
     const encodedUrl = encodeURIComponent(qrDataUrl);
@@ -371,7 +405,7 @@ function QrGeneratorModal({ closeOverlay }) {
                 className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5 transition-colors cursor-pointer mt-1"
               >
                 <i className="fa-solid fa-share-nodes text-xs"></i>
-                <span>Share QR Code target via...</span>
+                <span>Share QR Code image via...</span>
               </button>
             </div>
           ) : (
@@ -399,7 +433,7 @@ function QrGeneratorModal({ closeOverlay }) {
             <div className="flex justify-between items-center mb-4 pb-3 border-b border-white/10">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <i className="fa-solid fa-share-nodes text-indigo-400"></i>
-                Share your target via:
+                Share your QR code via:
               </h3>
               <button 
                 onClick={() => setShowShareModal(false)}
@@ -410,7 +444,7 @@ function QrGeneratorModal({ closeOverlay }) {
             </div>
 
             <p className="text-xs text-slate-400 mb-5 leading-relaxed">
-              Select a platform to share your generated QR code link target with others:
+              Select an app to share your generated QR code image with others:
             </p>
 
             {/* Platform Buttons Grid */}

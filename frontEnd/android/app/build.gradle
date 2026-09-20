@@ -3,6 +3,11 @@ apply plugin: 'com.android.application'
 android {
     namespace = "com.example.remopdf"
     compileSdk = rootProject.ext.compileSdkVersion
+
+    buildFeatures {
+        buildConfig = true
+    }
+
     defaultConfig {
         applicationId "com.example.remopdf"
         minSdkVersion rootProject.ext.minSdkVersion

@@ -1,5 +1,6 @@
 package com.example.remopdf;
 
+import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.net.Uri;
@@ -13,6 +14,7 @@ import androidx.coordinatorlayout.widget.CoordinatorLayout;
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import android.Manifest;
 import android.content.pm.PackageManager;
 
@@ -23,6 +25,7 @@ import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.webkit.DownloadListener;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
 import android.widget.Toast;
@@ -41,10 +44,16 @@ import com.google.android.gms.ads.MobileAds;
 import com.google.android.gms.ads.interstitial.InterstitialAd;
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends BridgeActivity { 
@@ -69,6 +78,7 @@ public class MainActivity extends BridgeActivity {
 
         hideSystemUI();
         setupDownloadListener();
+        setupDownloadBridge();
 
         // Lets you inspect the WebView from Chrome on your PC (chrome://inspect)
         // and see the REAL JavaScript error instead of a generic crash.
@@ -203,6 +213,147 @@ private void setupBannerAd() {
                     }
                 }
             });
+        }
+    }
+
+    /**
+     * Exposes window.AndroidDownloader to the WebView.
+     *
+     * The web layer can't reliably save images itself: fetch() to another origin can be
+     * blocked by CORS, and <a download href="blob:..."> hands a blob: URL to the
+     * DownloadListener above, which only understands data: URLs. So JS just passes the
+     * image URL here, we download the real bytes natively, and save them through the
+     * same path as the PDF downloads (same permission handling, same Android Toast).
+     */
+    private void setupDownloadBridge() {
+        WebView webView = getBridge().getWebView();
+        if (webView != null) {
+            webView.addJavascriptInterface(new DownloadBridge(), "AndroidDownloader");
+        }
+    }
+
+    private class DownloadBridge {
+        @JavascriptInterface
+        public void saveImageFromUrl(String imageUrl, String fileName) {
+            Executors.newSingleThreadExecutor().execute(() -> {
+                try {
+                    byte[] bytes = fetchImageBytes(imageUrl);
+
+                    String safeName = (fileName == null || fileName.trim().isEmpty()) ? "qrcode.png" : fileName;
+                    String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
+                    String dataUrl = "data:image/png;name=" + URLEncoder.encode(safeName, "UTF-8")
+                            + ";base64," + base64;
+
+                    // Reuse the existing save path (storage permission on API 23-28,
+                    // MediaStore on 29+, Android Toast, interstitial ad).
+                    runOnUiThread(() -> saveBase64ToDownloads(dataUrl, "image/png"));
+
+                } catch (Exception e) {
+                    Log.e("WebViewDownload", "Failed to download image: " + imageUrl, e);
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "Could not download the QR code. Check your connection.",
+                            Toast.LENGTH_LONG).show());
+                }
+            });
+        }
+
+        /**
+         * Shares the actual PNG (not a link) through the Android share sheet.
+         * target: "whatsapp" | "facebook" open that app directly if installed;
+         * anything else ("email", "mms", ...) opens the normal chooser.
+         */
+        @JavascriptInterface
+        public void shareImageFromUrl(String imageUrl, String fileName, String target) {
+            Executors.newSingleThreadExecutor().execute(() -> {
+                try {
+                    byte[] bytes = fetchImageBytes(imageUrl);
+
+                    String safeName = (fileName == null || fileName.trim().isEmpty()) ? "qrcode.png" : fileName;
+                    safeName = safeName.replaceAll("[^A-Za-z0-9._-]", "_");
+
+                    File dir = new File(getCacheDir(), "shared");
+                    if (!dir.exists()) dir.mkdirs();
+                    File file = new File(dir, safeName);
+                    try (FileOutputStream fos = new FileOutputStream(file)) {
+                        fos.write(bytes);
+                        fos.flush();
+                    }
+
+                    Uri uri = FileProvider.getUriForFile(
+                            MainActivity.this, getPackageName() + ".fileprovider", file);
+
+                    runOnUiThread(() -> launchImageShare(uri, target));
+
+                } catch (Exception e) {
+                    Log.e("WebViewShare", "Failed to share image: " + imageUrl, e);
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "Could not share the QR code.",
+                            Toast.LENGTH_LONG).show());
+                }
+            });
+        }
+    }
+
+    /** Downloads an https image and returns its raw bytes. Call from a background thread. */
+    private byte[] fetchImageBytes(String imageUrl) throws IOException {
+        if (imageUrl == null || !imageUrl.startsWith("https://")) {
+            throw new IOException("Unsupported image URL");
+        }
+
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(imageUrl).openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(15000);
+
+            if (conn.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                throw new IOException("HTTP " + conn.getResponseCode());
+            }
+            String contentType = conn.getContentType();
+            if (contentType == null || !contentType.startsWith("image/")) {
+                throw new IOException("Not an image: " + contentType);
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (InputStream in = conn.getInputStream()) {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
+                }
+            }
+            return out.toByteArray();
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private void launchImageShare(Uri uri, String target) {
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("image/png");
+        send.putExtra(Intent.EXTRA_STREAM, uri);
+        send.setClipData(ClipData.newRawUri("QR Code", uri));
+        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        String pkg = null;
+        if ("whatsapp".equals(target)) pkg = "com.whatsapp";
+        else if ("facebook".equals(target)) pkg = "com.facebook.katana";
+
+        if (pkg != null) {
+            try {
+                startActivity(new Intent(send).setPackage(pkg));
+                return;
+            } catch (Exception e) {
+                // App not installed -> fall back to the normal share sheet below
+                Log.d("WebViewShare", pkg + " not available, using chooser");
+            }
+        }
+
+        try {
+            startActivity(Intent.createChooser(send, "Share QR Code"));
+        } catch (Exception e) {
+            Log.e("WebViewShare", "No app can handle the share", e);
+            Toast.makeText(this, "No app available to share with", Toast.LENGTH_SHORT).show();
         }
     }
 

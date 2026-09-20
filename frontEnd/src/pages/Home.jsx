@@ -22,6 +22,7 @@ import image11 from '../assets/image11.png';
 import image12 from '../assets/image12.png';
 import image13 from '../assets/image13.png';
 import image14 from '../assets/image14.png';
+
 import {
   Copy,
   Scissors,
@@ -1043,10 +1044,6 @@ useEffect(() => {
           <i className="fa-solid fa-shield-halved text-[11px] text-emerald-600"></i>
           <span className="text-[10px] font-bold text-slate-600 leading-none tracking-tight">100% Private</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <i className="fa-solid fa-user-slash text-[11px] text-emerald-600"></i>
-          <span className="text-[10px] font-bold text-slate-600 leading-none tracking-tight">No Account</span>
-        </div>
       </div>
 
       {/* Floating Action Button — Search Tools */}
@@ -1064,13 +1061,9 @@ useEffect(() => {
 
       {/* Trust badges — right */}
       <div className="flex-1 flex items-center justify-end gap-3">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold text-slate-600 leading-none tracking-tight">Free Forever</span>
-          <i className="fa-solid fa-tag text-[11px] text-orange-500"></i>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold text-slate-600 leading-none tracking-tight">On-Device</span>
-          <i className="fa-solid fa-mobile-screen text-[11px] text-orange-500"></i>
+               <div className="flex items-center gap-1.5">
+          <i className="fa-solid fa-user-slash text-[11px] text-emerald-600"></i>
+          <span className="text-[10px] font-bold text-slate-600 leading-none tracking-tight">No Account</span>
         </div>
       </div>
 
