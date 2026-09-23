@@ -3,6 +3,8 @@ import ResumeForm from '../components/Resume/ResumeForm';
 import PaginatedPreview from '../components/Resume/PaginatedPreview';
 import ResumePreview from '../components/Resume/ResumePreview';
 import TemplateSlider from '../components/Resume/TemplateSlider';
+import SectionOrderEditor from '../components/Resume/SectionOrderEditor';
+import { REORDERABLE_TEMPLATES } from '../components/Resume/resumeSections';
 import profileImgItem from '../assets/profile2.png';
 
 
@@ -143,6 +145,7 @@ export default function ResumeBuilder() {
   const [isHeaderVisible, setIsHeaderVisible] = useState(true);
 const [lastScrollY, setLastScrollY] = useState(0);
 const [isNavigating, setIsNavigating] = useState(false);
+  const [showSectionOrder, setShowSectionOrder] = useState(false);
 
 const handleGoBack = () => {
   setIsNavigating(true);
@@ -817,6 +820,37 @@ const handleExport = async () => {
           </div>
           
           <div className="p-3 max-[340px]:p-2.5 bg-slate-50/50 border-t border-slate-100 pb-16 lg:pb-6">
+            {/* SECTION ORDER */}
+            <div className="mb-3 rounded-xl border border-slate-200/70 bg-white shadow-sm">
+              <button
+                type="button"
+                onClick={() => setShowSectionOrder((v) => !v)}
+                aria-expanded={showSectionOrder}
+                className="flex w-full cursor-pointer items-center justify-between px-3 py-2.5 text-left"
+              >
+                <span className="text-xs font-extrabold text-slate-800">Section order</span>
+                <svg
+                  className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-200 ${showSectionOrder ? 'rotate-180' : ''}`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {showSectionOrder && (
+                <div className="px-3 pb-3">
+                  {!REORDERABLE_TEMPLATES.has(activeTemplate) && (
+                    <p className="mb-2 rounded-lg bg-amber-50 px-2.5 py-2 text-[11px] font-medium leading-relaxed text-amber-800">
+                      The “{activeTemplate}” layout doesn’t support reordering yet. Try “Aether Minimal”.
+                    </p>
+                  )}
+                  <SectionOrderEditor
+                    order={resumeData.sectionOrder}
+                    onChange={(sectionOrder) => handleSetResumeData((prev) => ({ ...prev, sectionOrder }))}
+                  />
+                </div>
+              )}
+            </div>
+
             <TemplateSlider 
               activeTemplateId={activeTemplate} 
               onSelect={handleSetActiveTemplate} 

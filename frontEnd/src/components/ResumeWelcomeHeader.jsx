@@ -3,7 +3,33 @@ import officeImage from '../assets/office.png';
 import { Link } from 'react-router-dom';
 import image1 from '../assets/remopdf.png';
 
+// Removes the stored template choice so the builder starts without a preselected template.
+// Only the `template` field is stripped from each saved resume; the resumes themselves are kept.
+const clearStoredTemplates = () => {
+  try {
+    localStorage.removeItem('remo_premium_template');
+
+    const raw = localStorage.getItem('remo_saved_resumes');
+    if (!raw) return;
+
+    const resumes = JSON.parse(raw);
+    if (!Array.isArray(resumes)) return;
+
+    localStorage.setItem(
+      'remo_saved_resumes',
+      JSON.stringify(resumes.map(({ template, ...rest }) => rest))
+    );
+  } catch (err) {
+    console.error('Could not clear stored templates:', err);
+  }
+};
+
 const ExecutiveFeatureSection = ({ onNavigate }) => {
+  const handleBeginClick = (e) => {
+    clearStoredTemplates();
+    if (onNavigate) onNavigate(e);
+  };
+
   return (
     <section className="w-full max-w-7xl mx-auto px-6 py-16 sm:py-24 lg:py-28 font-sans selection:bg-amber-100 selection:text-amber-900">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
@@ -54,7 +80,7 @@ const ExecutiveFeatureSection = ({ onNavigate }) => {
           <div className="flex flex-col items-center lg:items-start gap-3 w-full sm:w-auto">
   <Link 
     to="/ResumeBuilder" 
-    onClick={onNavigate} 
+    onClick={handleBeginClick} 
     className="relative w-full sm:w-auto h-12 sm:h-14 px-10 rounded-full bg-slate-900 text-white text-sm font-semibold shadow-[0_15px_35px_-10px_rgba(15,23,42,0.3)] hover:shadow-[0_20px_40px_-5px_rgba(15,23,42,0.4)] hover:-translate-y-0.5 transition-all duration-300 overflow-hidden group flex items-center justify-center"
   >
     {/* Shimmering highlight effect */}

@@ -1,4 +1,5 @@
 import React from 'react';
+import { normalizeSectionOrder } from './resumeSections';
 
 export default function AetherMinimal({
   info,
@@ -139,6 +140,176 @@ export default function AetherMinimal({
 
   const validProjects = data?.projects || [];
 
+  // Saved order (or default). Always complete and valid.
+  const order = normalizeSectionOrder(data?.sectionOrder);
+
+  // Each section is a bare fragment: heading + entries stay flat siblings (no wrapper
+  // element), so the paginator can still split a long section across pages.
+  const sectionRenderers = {
+    skills: () => (
+      <>
+        {validSkills && validSkills.length > 0 && renderSectionHeader("Expertise")}
+        {validSkills && validSkills.length > 0 && (
+          validSkills.every(s => typeof s === 'string') ? (
+            <div className="w-full mb-4 text-[12px] text-gray-700 leading-relaxed font-medium break-inside-avoid shrink-0">
+              {validSkills.join('  •  ')}
+            </div>
+          ) : (
+            <div className="w-full flex flex-wrap gap-x-6 gap-y-1.5 mb-4 break-inside-avoid shrink-0">
+              {validSkills.map((skill, idx) => {
+                const name = skill.name || skill.category || skill.skill || '';
+                const keywords = skill.keywords ? skill.keywords.join(', ') : skill.details || '';
+                
+                return (
+                  <div key={`skill-${idx}`} className="text-[12px] text-gray-700 leading-relaxed">
+                    {name && <span className="font-semibold text-gray-900">{name}{keywords ? ': ' : ''}</span>}
+                    {keywords && <span className="text-gray-600">{keywords}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+      </>
+    ),
+    experience: () => (
+      <>
+        {validExperience && validExperience.length > 0 && renderSectionHeader("Experience")}
+        {validExperience && validExperience.map((exp, idx) => (
+          <React.Fragment key={`exp-${idx}`}>
+            <div className="flex justify-between items-baseline mb-0.5 w-full break-inside-avoid shrink-0">
+              <h4 className="text-[13px] font-semibold text-gray-900">{exp.role}</h4>
+              <span className="text-[11px] text-gray-500 font-medium tracking-wide shrink-0">
+                {formatDates(exp.startDate, exp.endDate, exp.isCurrent)}
+              </span>
+            </div>
+            <div className={`flex justify-between items-baseline w-full break-inside-avoid shrink-0 ${(exp.achievements?.length > 0 || exp.description) ? 'mb-2' : 'mb-4'}`}>
+              <span className="text-[12px] text-gray-600 font-medium">{exp.company}</span>
+              {exp.location && <span className="text-[11px] text-gray-500 shrink-0">{exp.location}</span>}
+            </div>
+            
+            {exp.achievements && exp.achievements.length > 0 ? (
+              exp.achievements.map((ach, i) => (
+                <li key={`ach-${i}`} className={`list-none pl-3 relative before:content-[''] before:absolute before:left-0 before:top-[0.45em] before:w-[3px] before:h-[3px] before:bg-gray-400 before:rounded-full text-[11.5px] text-gray-700 leading-relaxed w-full break-inside-avoid shrink-0 ${i === exp.achievements.length - 1 ? 'mb-4' : 'mb-1.5'}`}>
+                  {ach}
+                </li>
+              ))
+            ) : exp.description ? (
+              <div className="text-[11.5px] text-gray-700 leading-relaxed whitespace-pre-wrap w-full mb-4 break-inside-avoid shrink-0">
+                {exp.description}
+              </div>
+            ) : null}
+          </React.Fragment>
+        ))}
+      </>
+    ),
+    education: () => (
+      <>
+        {validEducation && validEducation.length > 0 && renderSectionHeader("Education")}
+        {validEducation && validEducation.map((edu, idx) => (
+          <React.Fragment key={`edu-${idx}`}>
+            <div className="flex justify-between items-baseline mb-0.5 w-full break-inside-avoid shrink-0">
+              <h4 className="text-[13px] font-semibold text-gray-900">
+                {edu.degree || edu.studyType}{edu.area && ` in ${edu.area}`}
+              </h4>
+              <span className="text-[11px] text-gray-500 font-medium tracking-wide shrink-0">
+                {formatDates(edu.startDate, edu.endDate, edu.isCurrent)}
+              </span>
+            </div>
+            <div className={`flex justify-between items-baseline w-full break-inside-avoid shrink-0 ${!edu.description ? 'mb-3' : 'mb-1.5'}`}>
+              <span className="text-[12px] text-gray-600 font-medium">{edu.school || edu.institution}</span>
+              {edu.location && <span className="text-[11px] text-gray-500 shrink-0">{edu.location}</span>}
+            </div>
+            {edu.description && (
+              <div className="text-[11.5px] text-gray-700 leading-relaxed whitespace-pre-wrap w-full mb-3 break-inside-avoid shrink-0">
+                {edu.description}
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </>
+    ),
+    projects: () => (
+      <>
+        {validProjects.length > 0 && renderSectionHeader("Projects")}
+        {validProjects.map((proj, idx) => (
+          <React.Fragment key={`proj-${idx}`}>
+            <div className={`flex justify-between items-baseline w-full break-inside-avoid shrink-0 ${!proj.description ? 'mb-3' : 'mb-1'}`}>
+              <h4 className="text-[13px] font-semibold text-gray-900">{proj.title || proj.name}</h4>
+              {proj.date && <span className="text-[11px] text-gray-500 font-medium tracking-wide shrink-0">{proj.date}</span>}
+            </div>
+            {proj.description && (
+              <div className="text-[11.5px] text-gray-700 leading-relaxed whitespace-pre-wrap w-full mb-3 break-inside-avoid shrink-0">
+                {proj.description}
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </>
+    ),
+    certificates: () => (
+      <>
+        {validCertificates && validCertificates.length > 0 && renderSectionHeader("Certifications")}
+        {validCertificates && validCertificates.map((cert, idx) => (
+          <React.Fragment key={`cert-${idx}`}>
+            <div className={`list-none pl-3 relative before:content-[''] before:absolute before:left-0 before:top-[0.45em] before:w-[3px] before:h-[3px] before:bg-gray-400 before:rounded-full text-[11.5px] text-gray-700 leading-relaxed w-full break-inside-avoid shrink-0 ${!cert.description ? (idx === validCertificates.length - 1 ? 'mb-4' : 'mb-2.5') : 'mb-1'}`}>
+              <div className="flex justify-between items-baseline">
+                <div>
+                  <span className="font-semibold text-gray-900">{cert.title || cert.name}</span>
+                  {cert.issuer && <span className="text-gray-600"> – {cert.issuer}</span>}
+                </div>
+                {cert.date && <span className="shrink-0 ml-2 text-[11px] text-gray-500 tracking-wide font-medium">{cert.date}</span>}
+              </div>
+            </div>
+            {cert.description && (
+              <div className={`whitespace-pre-wrap text-[11.5px] text-gray-600 leading-relaxed pl-3 w-full break-inside-avoid shrink-0 ${idx === validCertificates.length - 1 ? 'mb-4' : 'mb-2.5'}`}>
+                {cert.description}
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </>
+    ),
+    languages: () => (
+      <>
+        {validLanguages && validLanguages.length > 0 && renderSectionHeader("Languages")}
+        {validLanguages && validLanguages.length > 0 && (
+          <div className="w-full mb-4 text-[11.5px] text-gray-700 leading-relaxed font-medium break-inside-avoid shrink-0">
+            {validLanguages.map(l => `${l.name || l.language}${l.proficiency || l.level ? ` (${l.proficiency || l.level})` : ''}`).join('  •  ')}
+          </div>
+        )}
+      </>
+    ),
+    hobbies: () => (
+      <>
+        {validHobbies && validHobbies.length > 0 && renderSectionHeader("Hobbies")}
+        {validHobbies && validHobbies.length > 0 && (
+          <div className="w-full mb-4 text-[11.5px] text-gray-700 leading-relaxed font-medium break-inside-avoid shrink-0">
+            {validHobbies.map(h => typeof h === 'string' ? h : h.name).join('  •  ')}
+          </div>
+        )}
+      </>
+    ),
+    references: () => (
+      <>
+        {validReferences && validReferences.length > 0 && renderSectionHeader("References")}
+        {validReferences && validReferences.length > 0 && (
+          <div className="w-full grid grid-cols-2 gap-4 mb-4 break-inside-avoid shrink-0">
+            {validReferences.map((ref, idx) => (
+              <div key={`ref-${idx}`} className="text-[11.5px] text-gray-700 leading-relaxed">
+                <div className="font-semibold text-gray-900">{ref.name}</div>
+                {(ref.role || ref.company) && (
+                  <div className="text-gray-600">{ref.role}{ref.role && ref.company ? `, ${ref.company}` : ref.company}</div>
+                )}
+                {ref.contact && <div className="text-gray-500 mt-0.5">{ref.contact}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </>
+    ),
+  };
+
   return (
     <div id="resume-raw-content" className="w-full min-h-full bg-white pt-14 pb-14 px-12 relative flex flex-col font-sans-minimal">
       
@@ -187,151 +358,11 @@ export default function AetherMinimal({
         
         <main className="w-full flex flex-col">
 
-          {/* 1. SKILLS SECTION */}
-          {validSkills && validSkills.length > 0 && renderSectionHeader("Expertise")}
-          {validSkills && validSkills.length > 0 && (
-            validSkills.every(s => typeof s === 'string') ? (
-              <div className="w-full mb-4 text-[12px] text-gray-700 leading-relaxed font-medium break-inside-avoid shrink-0">
-                {validSkills.join('  •  ')}
-              </div>
-            ) : (
-              <div className="w-full flex flex-wrap gap-x-6 gap-y-1.5 mb-4 break-inside-avoid shrink-0">
-                {validSkills.map((skill, idx) => {
-                  const name = skill.name || skill.category || skill.skill || '';
-                  const keywords = skill.keywords ? skill.keywords.join(', ') : skill.details || '';
-                  
-                  return (
-                    <div key={`skill-${idx}`} className="text-[12px] text-gray-700 leading-relaxed">
-                      {name && <span className="font-semibold text-gray-900">{name}{keywords ? ': ' : ''}</span>}
-                      {keywords && <span className="text-gray-600">{keywords}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            )
-          )}
-
-          {/* 2. EXPERIENCE SECTION */}
-          {validExperience && validExperience.length > 0 && renderSectionHeader("Experience")}
-          {validExperience && validExperience.map((exp, idx) => (
-            <React.Fragment key={`exp-${idx}`}>
-              <div className="flex justify-between items-baseline mb-0.5 w-full break-inside-avoid shrink-0">
-                <h4 className="text-[13px] font-semibold text-gray-900">{exp.role}</h4>
-                <span className="text-[11px] text-gray-500 font-medium tracking-wide shrink-0">
-                  {formatDates(exp.startDate, exp.endDate, exp.isCurrent)}
-                </span>
-              </div>
-              <div className={`flex justify-between items-baseline w-full break-inside-avoid shrink-0 ${(exp.achievements?.length > 0 || exp.description) ? 'mb-2' : 'mb-4'}`}>
-                <span className="text-[12px] text-gray-600 font-medium">{exp.company}</span>
-                {exp.location && <span className="text-[11px] text-gray-500 shrink-0">{exp.location}</span>}
-              </div>
-              
-              {exp.achievements && exp.achievements.length > 0 ? (
-                exp.achievements.map((ach, i) => (
-                  <li key={`ach-${i}`} className={`list-none pl-3 relative before:content-[''] before:absolute before:left-0 before:top-[0.45em] before:w-[3px] before:h-[3px] before:bg-gray-400 before:rounded-full text-[11.5px] text-gray-700 leading-relaxed w-full break-inside-avoid shrink-0 ${i === exp.achievements.length - 1 ? 'mb-4' : 'mb-1.5'}`}>
-                    {ach}
-                  </li>
-                ))
-              ) : exp.description ? (
-                <div className="text-[11.5px] text-gray-700 leading-relaxed whitespace-pre-wrap w-full mb-4 break-inside-avoid shrink-0">
-                  {exp.description}
-                </div>
-              ) : null}
-            </React.Fragment>
+          {/* Sections render in the user's chosen order. Fragments add no DOM nodes, so every
+              heading/entry is still a direct child of <main> for the paginator. */}
+          {order.map((id) => (
+            <React.Fragment key={id}>{sectionRenderers[id]?.()}</React.Fragment>
           ))}
-
-          {/* 3. EDUCATION SECTION */}
-          {validEducation && validEducation.length > 0 && renderSectionHeader("Education")}
-          {validEducation && validEducation.map((edu, idx) => (
-            <React.Fragment key={`edu-${idx}`}>
-              <div className="flex justify-between items-baseline mb-0.5 w-full break-inside-avoid shrink-0">
-                <h4 className="text-[13px] font-semibold text-gray-900">
-                  {edu.degree || edu.studyType}{edu.area && ` in ${edu.area}`}
-                </h4>
-                <span className="text-[11px] text-gray-500 font-medium tracking-wide shrink-0">
-                  {formatDates(edu.startDate, edu.endDate, edu.isCurrent)}
-                </span>
-              </div>
-              <div className={`flex justify-between items-baseline w-full break-inside-avoid shrink-0 ${!edu.description ? 'mb-3' : 'mb-1.5'}`}>
-                <span className="text-[12px] text-gray-600 font-medium">{edu.school || edu.institution}</span>
-                {edu.location && <span className="text-[11px] text-gray-500 shrink-0">{edu.location}</span>}
-              </div>
-              {edu.description && (
-                <div className="text-[11.5px] text-gray-700 leading-relaxed whitespace-pre-wrap w-full mb-3 break-inside-avoid shrink-0">
-                  {edu.description}
-                </div>
-              )}
-            </React.Fragment>
-          ))}
-
-          {/* 4. PROJECTS SECTION */}
-          {validProjects.length > 0 && renderSectionHeader("Projects")}
-          {validProjects.map((proj, idx) => (
-            <React.Fragment key={`proj-${idx}`}>
-              <div className={`flex justify-between items-baseline w-full break-inside-avoid shrink-0 ${!proj.description ? 'mb-3' : 'mb-1'}`}>
-                <h4 className="text-[13px] font-semibold text-gray-900">{proj.title || proj.name}</h4>
-                {proj.date && <span className="text-[11px] text-gray-500 font-medium tracking-wide shrink-0">{proj.date}</span>}
-              </div>
-              {proj.description && (
-                <div className="text-[11.5px] text-gray-700 leading-relaxed whitespace-pre-wrap w-full mb-3 break-inside-avoid shrink-0">
-                  {proj.description}
-                </div>
-              )}
-            </React.Fragment>
-          ))}
-
-          {/* 5. CERTIFICATIONS SECTION */}
-          {validCertificates && validCertificates.length > 0 && renderSectionHeader("Certifications")}
-          {validCertificates && validCertificates.map((cert, idx) => (
-            <React.Fragment key={`cert-${idx}`}>
-              <div className={`list-none pl-3 relative before:content-[''] before:absolute before:left-0 before:top-[0.45em] before:w-[3px] before:h-[3px] before:bg-gray-400 before:rounded-full text-[11.5px] text-gray-700 leading-relaxed w-full break-inside-avoid shrink-0 ${!cert.description ? (idx === validCertificates.length - 1 ? 'mb-4' : 'mb-2.5') : 'mb-1'}`}>
-                <div className="flex justify-between items-baseline">
-                  <div>
-                    <span className="font-semibold text-gray-900">{cert.title || cert.name}</span>
-                    {cert.issuer && <span className="text-gray-600"> – {cert.issuer}</span>}
-                  </div>
-                  {cert.date && <span className="shrink-0 ml-2 text-[11px] text-gray-500 tracking-wide font-medium">{cert.date}</span>}
-                </div>
-              </div>
-              {cert.description && (
-                <div className={`whitespace-pre-wrap text-[11.5px] text-gray-600 leading-relaxed pl-3 w-full break-inside-avoid shrink-0 ${idx === validCertificates.length - 1 ? 'mb-4' : 'mb-2.5'}`}>
-                  {cert.description}
-                </div>
-              )}
-            </React.Fragment>
-          ))}
-
-          {/* 6. LANGUAGES SECTION */}
-          {validLanguages && validLanguages.length > 0 && renderSectionHeader("Languages")}
-          {validLanguages && validLanguages.length > 0 && (
-            <div className="w-full mb-4 text-[11.5px] text-gray-700 leading-relaxed font-medium break-inside-avoid shrink-0">
-              {validLanguages.map(l => `${l.name || l.language}${l.proficiency || l.level ? ` (${l.proficiency || l.level})` : ''}`).join('  •  ')}
-            </div>
-          )}
-
-          {/* 7. HOBBIES SECTION */}
-          {validHobbies && validHobbies.length > 0 && renderSectionHeader("Hobbies")}
-          {validHobbies && validHobbies.length > 0 && (
-            <div className="w-full mb-4 text-[11.5px] text-gray-700 leading-relaxed font-medium break-inside-avoid shrink-0">
-              {validHobbies.map(h => typeof h === 'string' ? h : h.name).join('  •  ')}
-            </div>
-          )}
-
-          {/* 8. REFERENCES SECTION */}
-          {validReferences && validReferences.length > 0 && renderSectionHeader("References")}
-          {validReferences && validReferences.length > 0 && (
-            <div className="w-full grid grid-cols-2 gap-4 mb-4 break-inside-avoid shrink-0">
-              {validReferences.map((ref, idx) => (
-                <div key={`ref-${idx}`} className="text-[11.5px] text-gray-700 leading-relaxed">
-                  <div className="font-semibold text-gray-900">{ref.name}</div>
-                  {(ref.role || ref.company) && (
-                    <div className="text-gray-600">{ref.role}{ref.role && ref.company ? `, ${ref.company}` : ref.company}</div>
-                  )}
-                  {ref.contact && <div className="text-gray-500 mt-0.5">{ref.contact}</div>}
-                </div>
-              ))}
-            </div>
-          )}
 
         </main>
       </div>

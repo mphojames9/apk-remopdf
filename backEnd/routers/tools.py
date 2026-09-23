@@ -466,72 +466,67 @@ async def convert_pdf_to_word(files: List[UploadFile] = File(...)):
 async def convert_pdf_to_excel(files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(status_code=400, detail="No PDF files provided.")
-    
+
     try:
+        # Initialize Adobe Credentials — same pattern as pdf-to-word
+        credentials = ServicePrincipalCredentials(
+            client_id=os.getenv('PDF_SERVICES_CLIENT_ID'),
+            client_secret=os.getenv('PDF_SERVICES_CLIENT_SECRET')
+        )
+        pdf_services = PDFServices(credentials=credentials)
+
         zip_buffer = io.BytesIO()
-        
+
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for file in files:
                 file_bytes = await file.read()
-                
-                # Secure temp files with immediate OS lock release
-                fd_pdf, temp_pdf_path = tempfile.mkstemp(suffix=".pdf")
+
                 fd_xlsx, temp_xlsx_path = tempfile.mkstemp(suffix=".xlsx")
-                os.close(fd_pdf)
                 os.close(fd_xlsx)
-                
+
                 try:
-                    with open(temp_pdf_path, 'wb') as f:
-                        f.write(file_bytes)
-                    
-                    # Extract tabular data safely using pdfplumber
-                    all_data = []
-                    with pdfplumber.open(temp_pdf_path) as pdf:
-                        for page in pdf.pages:
-                            # Extract tables; if none, extract standard text as fallback
-                            tables = page.extract_tables()
-                            if tables:
-                                for table in tables:
-                                    all_data.extend(table)
-                                    all_data.append([]) # Visual separator row between tables
-                            else:
-                                text = page.extract_text()
-                                if text:
-                                    # Split text by newlines so it populates rows sequentially
-                                    for line in text.split('\n'):
-                                        all_data.append([line])
-                    
-                    # Convert to Excel using Pandas
-                    if all_data:
-                        df = pd.DataFrame(all_data)
-                        df.to_excel(temp_xlsx_path, index=False, header=False)
-                    else:
-                        # Fallback for completely blank scanned PDFs
-                        df = pd.DataFrame([["No extractable text or tables found in this document."]])
-                        df.to_excel(temp_xlsx_path, index=False, header=False)
-                    
-                    # Read the generated Excel file back into memory
-                    with open(temp_xlsx_path, "rb") as xlsx_file:
-                        xlsx_bytes = xlsx_file.read()
-                    
+                    # Upload the raw bytes to Adobe
+                    input_asset = pdf_services.upload(input_stream=file_bytes, mime_type=PDFServicesMediaType.PDF)
+
+                    # Generate the XLSX — Adobe's actual table/layout-aware engine,
+                    # instead of the old pdfplumber+pandas text dump
+                    export_pdf_params = ExportPDFParams(target_format=ExportPDFTargetFormat.XLSX)
+                    export_pdf_job = ExportPDFJob(input_asset=input_asset, export_pdf_params=export_pdf_params)
+                    location = pdf_services.submit(export_pdf_job)
+                    pdf_services_response = pdf_services.get_job_result(location, ExportPDFResult)
+
+                    # Retrieve the Adobe Stream
+                    result_asset: CloudAsset = pdf_services_response.get_result().get_asset()
+                    stream_asset: StreamAsset = pdf_services.get_content(result_asset)
+
+                    with open(temp_xlsx_path, "wb") as f:
+                        f.write(stream_asset.get_input_stream())
+
+                    with open(temp_xlsx_path, "rb") as f:
+                        xlsx_bytes = f.read()
+
                     base_name = file.filename.rsplit('.', 1)[0] if '.' in file.filename else file.filename
-                    xlsx_filename = f"{base_name}_Data.xlsx"
-                    
+                    xlsx_filename = f"{base_name}.xlsx"
+
                     zip_file.writestr(xlsx_filename, xlsx_bytes)
-                    
+
+                except Exception as adobe_error:
+                    status_code = getattr(adobe_error, "status_code", None)
+                    error_code = getattr(adobe_error, "error_code", None) or getattr(adobe_error, "code", None)
+                    print(f"Adobe Engine Error on {file.filename}: status={status_code} code={error_code} detail={adobe_error}")
+                    raise HTTPException(status_code=500, detail=f"Adobe failed to process {file.filename}: {adobe_error}")
                 finally:
-                    # Clean up physical files
-                    if os.path.exists(temp_pdf_path):
-                        os.remove(temp_pdf_path)
                     if os.path.exists(temp_xlsx_path):
                         os.remove(temp_xlsx_path)
-                        
+
         zip_buffer.seek(0)
         return StreamingResponse(
             zip_buffer,
             media_type="application/zip",
             headers={"Content-Disposition": "attachment; filename=RemoPDF_Excel_Files.zip"}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Excel Conversion Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"PDF to Excel conversion failed: {str(e)}")
@@ -561,8 +556,16 @@ async def convert_word_to_pdf(files: List[UploadFile] = File(...)):
             os.close(fd_pdf)
 
             try:
+                # Legacy .doc (binary/OLE2) and modern .docx (OOXML/zip) are
+                # different file formats. Adobe validates the upload's bytes
+                # against the mime_type you declare, so a .doc file uploaded
+                # as DOCX gets rejected as invalid/corrupt. Pick the type that
+                # actually matches the extension.
+                is_legacy_doc = file.filename.lower().endswith(".doc") and not file.filename.lower().endswith(".docx")
+                media_type = PDFServicesMediaType.DOC if is_legacy_doc else PDFServicesMediaType.DOCX
+
                 # Upload the raw Word bytes to Adobe
-                input_asset = pdf_services.upload(input_stream=file_bytes, mime_type=PDFServicesMediaType.DOCX)
+                input_asset = pdf_services.upload(input_stream=file_bytes, mime_type=media_type)
 
                 # Convert to PDF
                 create_pdf_job = CreatePDFJob(input_asset=input_asset)
@@ -583,8 +586,15 @@ async def convert_word_to_pdf(files: List[UploadFile] = File(...)):
                 converted_files.append((f"{base_name}.pdf", pdf_bytes))
 
             except Exception as adobe_error:
-                print(f"Adobe Engine Error on {file.filename}: {adobe_error}")
-                raise HTTPException(status_code=500, detail=f"Adobe failed to process {file.filename}.")
+                # CRITICAL FIX: adobe_error.message / str(adobe_error) is often just
+                # the exception class with no detail for ServiceApiException. Pull the
+                # actual status/error code out so the terminal tells you what really
+                # went wrong (bad auth, quota exhausted, invalid file, etc.) instead of
+                # every failure looking identical.
+                status_code = getattr(adobe_error, "status_code", None)
+                error_code = getattr(adobe_error, "error_code", None) or getattr(adobe_error, "code", None)
+                print(f"Adobe Engine Error on {file.filename}: status={status_code} code={error_code} detail={adobe_error}")
+                raise HTTPException(status_code=500, detail=f"Adobe failed to process {file.filename}: {adobe_error}")
             finally:
                 if os.path.exists(temp_pdf_path):
                     os.remove(temp_pdf_path)
@@ -642,8 +652,16 @@ async def convert_excel_to_pdf(files: List[UploadFile] = File(...)):
             os.close(fd_pdf)
 
             try:
+                # Legacy .xls (binary BIFF) and modern .xlsx (OOXML/zip) are
+                # different file formats. Adobe validates the upload's bytes
+                # against the mime_type you declare, so an .xls file uploaded
+                # as XLSX gets rejected as invalid/corrupt. Pick the type that
+                # actually matches the extension.
+                is_legacy_xls = file.filename.lower().endswith(".xls") and not file.filename.lower().endswith(".xlsx")
+                media_type = PDFServicesMediaType.XLS if is_legacy_xls else PDFServicesMediaType.XLSX
+
                 # Upload the raw Excel bytes to Adobe
-                input_asset = pdf_services.upload(input_stream=file_bytes, mime_type=PDFServicesMediaType.XLSX)
+                input_asset = pdf_services.upload(input_stream=file_bytes, mime_type=media_type)
 
                 # Convert to PDF
                 create_pdf_job = CreatePDFJob(input_asset=input_asset)
@@ -664,8 +682,12 @@ async def convert_excel_to_pdf(files: List[UploadFile] = File(...)):
                 converted_files.append((f"{base_name}.pdf", pdf_bytes))
 
             except Exception as adobe_error:
-                print(f"Adobe Engine Error on {file.filename}: {adobe_error}")
-                raise HTTPException(status_code=500, detail=f"Adobe failed to process {file.filename}.")
+                # Pull the actual status/error code out so the terminal tells you
+                # what really went wrong instead of every failure looking identical.
+                status_code = getattr(adobe_error, "status_code", None)
+                error_code = getattr(adobe_error, "error_code", None) or getattr(adobe_error, "code", None)
+                print(f"Adobe Engine Error on {file.filename}: status={status_code} code={error_code} detail={adobe_error}")
+                raise HTTPException(status_code=500, detail=f"Adobe failed to process {file.filename}: {adobe_error}")
             finally:
                 if os.path.exists(temp_pdf_path):
                     os.remove(temp_pdf_path)
@@ -845,59 +867,71 @@ async def change_password_of_pdf(
 
 @router.post("/pdf-to-ppt")
 async def convert_pdf_to_ppt(files: List[UploadFile] = File(...)):
-    from pptx import Presentation
-    from pptx.util import Inches
-    import io
-    import zipfile
-    
     if not files:
         raise HTTPException(status_code=400, detail="No PDF files provided.")
-    
+
     try:
+        credentials = ServicePrincipalCredentials(
+            client_id=os.getenv('PDF_SERVICES_CLIENT_ID'),
+            client_secret=os.getenv('PDF_SERVICES_CLIENT_SECRET')
+        )
+        pdf_services = PDFServices(credentials=credentials)
+
         zip_buffer = io.BytesIO()
-        
+
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for file in files:
                 file_bytes = await file.read()
+
+                # Check for password protection immediately — kept exactly as before,
+                # the frontend's pptProtectedError flow relies on this precise
+                # "ENCRYPTED:<filename>" detail string to prompt for a password.
                 doc = fitz.open(stream=file_bytes, filetype="pdf")
-                
-                # Check for password protection immediately
                 if doc.is_encrypted and not doc.authenticate(""):
                     doc.close()
-                    # We pass a specific ENCRYPTED tag that the React frontend will catch
                     raise HTTPException(status_code=403, detail=f"ENCRYPTED:{file.filename}")
-                
-                prs = Presentation()
-                # Set a modern 16:9 widescreen layout
-                prs.slide_width = Inches(10)
-                prs.slide_height = Inches(5.625) 
-                
-                for page_num in range(len(doc)):
-                    page = doc[page_num]
-                    # Render page to high quality image map
-                    pix = page.get_pixmap(dpi=150)
-                    img_bytes = pix.tobytes("jpeg")
-                    img_stream = io.BytesIO(img_bytes)
-                    
-                    # Add a blank layout slide (usually index 6)
-                    blank_slide_layout = prs.slide_layouts[6] 
-                    slide = prs.slides.add_slide(blank_slide_layout)
-                    
-                    # Insert the image filling the entire slide background
-                    slide.shapes.add_picture(img_stream, 0, 0, width=prs.slide_width, height=prs.slide_height)
-                    
                 doc.close()
-                
-                # Save presentation safely to memory buffer
-                ppt_buffer = io.BytesIO()
-                prs.save(ppt_buffer)
-                ppt_bytes = ppt_buffer.getvalue()
-                
-                base_name = file.filename.rsplit('.', 1)[0] if '.' in file.filename else file.filename
-                ppt_filename = f"{base_name}_Presentation.pptx"
-                
-                zip_file.writestr(ppt_filename, ppt_bytes)
-                
+
+                fd_pptx, temp_pptx_path = tempfile.mkstemp(suffix=".pptx")
+                os.close(fd_pptx)
+
+                try:
+                    # Upload the raw PDF bytes to Adobe
+                    input_asset = pdf_services.upload(input_stream=file_bytes, mime_type=PDFServicesMediaType.PDF)
+
+                    # Generate the PPTX — Adobe's real conversion engine (actual text/
+                    # shape slides), instead of rasterizing each page into one big image
+                    export_pdf_params = ExportPDFParams(target_format=ExportPDFTargetFormat.PPTX)
+                    export_pdf_job = ExportPDFJob(input_asset=input_asset, export_pdf_params=export_pdf_params)
+                    location = pdf_services.submit(export_pdf_job)
+                    pdf_services_response = pdf_services.get_job_result(location, ExportPDFResult)
+
+                    # Retrieve the Adobe Stream
+                    result_asset: CloudAsset = pdf_services_response.get_result().get_asset()
+                    stream_asset: StreamAsset = pdf_services.get_content(result_asset)
+
+                    with open(temp_pptx_path, "wb") as f:
+                        f.write(stream_asset.get_input_stream())
+
+                    with open(temp_pptx_path, "rb") as f:
+                        ppt_bytes = f.read()
+
+                    base_name = file.filename.rsplit('.', 1)[0] if '.' in file.filename else file.filename
+                    ppt_filename = f"{base_name}_Presentation.pptx"
+
+                    zip_file.writestr(ppt_filename, ppt_bytes)
+
+                except HTTPException:
+                    raise
+                except Exception as adobe_error:
+                    status_code = getattr(adobe_error, "status_code", None)
+                    error_code = getattr(adobe_error, "error_code", None) or getattr(adobe_error, "code", None)
+                    print(f"Adobe Engine Error on {file.filename}: status={status_code} code={error_code} detail={adobe_error}")
+                    raise HTTPException(status_code=500, detail=f"Adobe failed to process {file.filename}: {adobe_error}")
+                finally:
+                    if os.path.exists(temp_pptx_path):
+                        os.remove(temp_pptx_path)
+
         zip_buffer.seek(0)
         return StreamingResponse(
             zip_buffer,

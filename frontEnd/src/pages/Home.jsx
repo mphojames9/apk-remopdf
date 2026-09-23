@@ -22,6 +22,10 @@ import image11 from '../assets/image11.png';
 import image12 from '../assets/image12.png';
 import image13 from '../assets/image13.png';
 import image14 from '../assets/image14.png';
+import image15 from '../assets/image15.png';
+import image16 from '../assets/image16.png';
+import image17 from '../assets/image17.png';
+import image18 from '../assets/image18.png';
 
 import {
   Copy,
@@ -194,27 +198,49 @@ const toolsList = [
   { id: 'resume-builder', title: 'ResumeBuilder', image: image14, action: () => navigate('/ResumeBuilder') },
   
   // Reusing images 1-4 below since only 14 images were imported
-  { id: 'qr-scanner', title: 'QR Scanner', image: image1, action: () => { setIsQrScannerModalOpen(true); setQrResult(''); } },
-  { id: 'open-workspace', title: 'Open Workspace', image: image2, action: () => navigate('/Workspace') },
-  { id: 'qr-generator', title: 'QR Generator', image: image3, action: () => setIsQrGeneratorModalOpen(true) },
-  { id: 'extract-zip', title: 'Extract ZIP', image: image4, action: () => navigate('/ZipTool') }
+  { id: 'qr-scanner', title: 'QR Scanner', image: image15, action: () => { setIsQrScannerModalOpen(true); setQrResult(''); } },
+  { id: 'open-workspace', title: 'Open Workspace', image: image17, action: () => navigate('/Workspace') },
+  { id: 'qr-generator', title: 'QR Generator', image: image16, action: () => setIsQrGeneratorModalOpen(true) },
+  { id: 'extract-zip', title: 'Extract ZIP', image: image18, action: () => navigate('/ZipTool') }
 ];
 
 const toolCategories = [
   {
-    name: 'Organize & Protect',
-    icon: 'fa-folder-tree',
-    ids: ['merge', 'split', 'page-manager', 'protect-pdf', 'unlock-pdf', 'change-password'],
-  },
-  {
-    name: 'Convert & Compress',
-    icon: 'fa-arrows-rotate',
-    ids: ['compress', 'image-to-pdf', 'pdf-to-image', 'image-compressor', 'pdf-to-word', 'pdf-to-excel', 'word-to-pdf', 'excel-to-pdf', 'pdf-to-ppt'],
-  },
-  {
-    name: 'Scan & Share',
+    name: 'QR & ZIP',
     icon: 'fa-qrcode',
-    ids: ['qr-scanner', 'qr-generator', 'extract-zip', 'open-workspace'],
+    ids: ['qr-scanner', 'qr-generator', 'extract-zip'],
+  },
+  {
+    name: 'Workspace',
+    icon: 'fa-layer-group',
+    ids: ['open-workspace'],
+    featured: true,
+    description: 'Edit and manage your PDFs in one place', // reword as you like
+  },
+  {
+    name: 'Organize',
+    icon: 'fa-folder-tree',
+    ids: ['merge', 'split', 'page-manager'],
+  },
+  {
+    name: 'Security',
+    icon: 'fa-shield-halved',
+    ids: ['protect-pdf', 'unlock-pdf', 'change-password'],
+  },
+  {
+    name: 'Compress',
+    icon: 'fa-compress',
+    ids: ['compress', 'image-compressor'],
+  },
+  {
+    name: 'Convert to PDF',
+    icon: 'fa-file-import',
+    ids: ['image-to-pdf', 'word-to-pdf', 'excel-to-pdf'],
+  },
+  {
+    name: 'Convert from PDF',
+    icon: 'fa-file-export',
+    ids: ['pdf-to-image', 'pdf-to-word', 'pdf-to-excel', 'pdf-to-ppt'],
   },
 ];
 
@@ -907,11 +933,11 @@ useEffect(() => {
 
 {/* --- VIEW TOGGLE --- */}
 <div className="max-w-7xl mx-auto w-full px-5 pt-5 pb-7 mt-15">
-  <div className="relative flex p-1.5 bg-gradient-to-b from-neutral-900 to-neutral-800 rounded-[22px] border border-orange-500/40">
+  <div className="relative flex p-1.5 bg-slate-900 rounded-[22px] border border-slate-700/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
 
-    {/* Sliding active pill - premium black gradient, orange border, no outset shadow */}
+    {/* Sliding active pill: lighter slate, red highlight border, no outset shadow */}
     <div
-      className={`absolute top-1.5 bottom-1.5 left-1.5 w-[calc(50%-0.375rem)] rounded-[16px] bg-gradient-to-b from-neutral-700 via-neutral-800 to-neutral-900 border border-orange-500/70 transition-transform duration-300 ease-out ${
+      className={`absolute top-1.5 bottom-1.5 left-1.5 w-[calc(50%-0.375rem)] rounded-[16px] bg-gradient-to-b from-slate-700 to-slate-800 border border-[#FF4B5C]/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] transition-transform duration-300 ease-out ${
         activeView === 'resume' ? 'translate-x-full' : 'translate-x-0'
       }`}
     />
@@ -919,53 +945,82 @@ useEffect(() => {
     <button
       onClick={() => setActiveView('tools')}
       className={`relative z-10 flex-1 h-11 rounded-[16px] text-[13px] font-bold flex items-center justify-center gap-2 transition-colors duration-200 ${
-        activeView === 'tools' ? 'text-white' : 'text-neutral-500 hover:text-neutral-300'
+        activeView === 'tools' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
       }`}
     >
-      <i className={`fa-solid fa-toolbox text-xs ${activeView === 'tools' ? 'text-orange-400' : ''}`}></i> PDF Tools
+      <i className={`fa-solid fa-toolbox text-xs ${activeView === 'tools' ? 'text-[#FF4B5C]' : ''}`}></i> PDF Tools
     </button>
 
     <button
       onClick={() => setActiveView('resume')}
       className={`relative z-10 flex-1 h-11 rounded-[16px] text-[13px] font-bold flex items-center justify-center gap-2 transition-colors duration-200 ${
-        activeView === 'resume' ? 'text-white' : 'text-neutral-500 hover:text-neutral-300'
+        activeView === 'resume' ? 'text-white' : 'text-slate-400 hover:text-slate-200'
       }`}
     >
-      <i className={`fa-solid fa-file-lines text-xs ${activeView === 'resume' ? 'text-orange-400' : ''}`}></i> Resume Builder
+      <i className={`fa-solid fa-file-lines text-xs ${activeView === 'resume' ? 'text-[#FF4B5C]' : ''}`}></i> Resume Builder
     </button>
   </div>
 </div>
 
 {/* --- ALL TOOLS, GROUPED --- */}
 <div id="tools-grid" className={`max-w-7xl mx-auto w-full px-5 ${activeView === 'tools' ? '' : 'hidden'}`}>
-  {toolCategories.map((category) => {
-    const items = toolsList.filter((tool) => category.ids.includes(tool.id));
-    if (!items.length) return null;
+{toolCategories.map((category) => {
+  const items = category.ids
+    .map((id) => toolsList.find((tool) => tool.id === id))
+    .filter(Boolean);
+  if (!items.length) return null;
 
-    return (
-      <div key={category.name} className="mb-11">
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-neutral-700 to-neutral-800 border border-orange-500/30 flex items-center justify-center shrink-0 shadow-[inset_0_2px_3px_rgba(255,255,255,0.08),inset_0_-2px_4px_rgba(0,0,0,0.4)]">
-            <i className={`fa-solid ${category.icon} text-orange-400 text-[14px]`}></i>
-          </div>
-          <h3 className="text-[17px] font-black text-slate-900 tracking-tight">{category.name}</h3>
-          <span className="text-[11px] font-extrabold text-white bg-gradient-to-b from-neutral-700 to-neutral-900 px-3.5 py-1.5 rounded-full leading-none shadow-[inset_0_2px_4px_rgba(0,0,0,0.55),inset_0_-1px_1px_rgba(255,255,255,0.08)] border border-black/30">
+  return (
+    <div key={category.name} className="mb-11">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-10 h-10 rounded-2xl bg-slate-900 border border-[#FF4B5C]/30 flex items-center justify-center shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+          <i className={`fa-solid ${category.icon} text-[#FF4B5C] text-[14px]`}></i>
+        </div>
+        <h3 className="text-[17px] font-black text-slate-900 tracking-tight">{category.name}</h3>
+        {items.length > 1 && (
+          <span className="text-[11px] font-extrabold text-white bg-slate-900 px-3.5 py-1.5 rounded-full leading-none border border-slate-700/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
             {items.length}
           </span>
-          <div className="flex-1 h-px bg-gradient-to-r from-slate-200 to-transparent ml-1"></div>
-        </div>
+        )}
+        {/* Red-to-grey fading divider */}
+        <div className="flex-1 h-px bg-gradient-to-r from-[#FF4B5C]/40 via-slate-200 to-transparent ml-1"></div>
+      </div>
 
+      {category.featured ? (
+        items.map((tool) => (
+          <button
+            key={tool.id}
+            onClick={tool.action}
+            className="group relative w-full bg-white p-4 rounded-[24px] border border-slate-200/80 hover:border-slate-900 transition-all duration-200 hover:-translate-y-1 active:translate-y-0 active:scale-[0.98] flex items-center gap-4 text-left cursor-pointer overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FF4B5C]"
+          >
+            <span className="pointer-events-none absolute -top-10 -right-10 w-32 h-32 rounded-full bg-[#FF4B5C]/0 group-hover:bg-[#FF4B5C]/10 blur-2xl transition-colors duration-300"></span>
+
+            <div className="relative w-16 h-16 bg-gradient-to-b from-slate-50 to-slate-100 border border-slate-200/70 group-hover:border-[#FF4B5C]/40 rounded-[18px] flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105 group-hover:-rotate-3">
+              <img src={tool.image} alt="" className="w-9 h-9 object-contain" />
+            </div>
+
+            <div className="relative flex-1 min-w-0">
+              <h3 className="font-bold text-[15px] text-slate-900 leading-tight">{tool.title}</h3>
+              {category.description && (
+                <p className="text-[12px] text-slate-500 mt-0.5">{category.description}</p>
+              )}
+            </div>
+
+            <i className="fa-solid fa-chevron-right relative text-slate-300 group-hover:text-[#FF4B5C] text-sm transition-colors"></i>
+          </button>
+        ))
+      ) : (
         <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
           {items.map((tool) => (
             <button
               key={tool.id}
               onClick={tool.action}
-              className="group relative bg-white p-4 rounded-[24px] border border-slate-200/80 hover:border-black transition-all duration-200 hover:-translate-y-1 active:translate-y-0 active:scale-[0.97] flex flex-col items-center text-center cursor-pointer h-full overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-500"
+              className="group relative bg-white p-4 rounded-[24px] border border-slate-200/80 hover:border-slate-900 transition-all duration-200 hover:-translate-y-1 active:translate-y-0 active:scale-[0.97] flex flex-col items-center text-center cursor-pointer h-full overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FF4B5C]"
             >
-              <span className="pointer-events-none absolute -top-10 -right-10 w-24 h-24 rounded-full bg-orange-500/0 group-hover:bg-orange-500/10 blur-2xl transition-colors duration-300"></span>
+              <span className="pointer-events-none absolute -top-10 -right-10 w-24 h-24 rounded-full bg-[#FF4B5C]/0 group-hover:bg-[#FF4B5C]/10 blur-2xl transition-colors duration-300"></span>
 
               <div
-                className={`relative w-16 h-16 ${tool.bgColor || 'bg-gradient-to-b from-slate-50 to-slate-100'} border border-slate-200/70 group-hover:border-orange-300 rounded-[18px] flex items-center justify-center mb-3 transition-transform duration-200 group-hover:scale-105 group-hover:-rotate-3 group-active:scale-90`}
+                className={`relative w-16 h-16 ${tool.bgColor || 'bg-gradient-to-b from-slate-50 to-slate-100'} border border-slate-200/70 group-hover:border-[#FF4B5C]/40 rounded-[18px] flex items-center justify-center mb-3 transition-transform duration-200 group-hover:scale-105 group-hover:-rotate-3 group-active:scale-90`}
               >
                 <img src={tool.image} alt="" className="w-9 h-9 object-contain" />
               </div>
@@ -976,41 +1031,45 @@ useEffect(() => {
             </button>
           ))}
         </div>
-      </div>
-    );
-  })}
+      )}
+    </div>
+  );
+})}
 </div>
 
 {/* --- RESUME BUILDER HOME --- */}
 <div id="resume-home" className={`max-w-7xl mx-auto w-full px-5 ${activeView === 'resume' ? '' : 'hidden'}`}>
 
   {/* Hero */}
-  <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-neutral-900 via-neutral-900 to-neutral-800 border border-orange-500/25 p-5 sm:p-8 mb-10">
-    <span className="pointer-events-none absolute -top-16 -right-10 w-52 h-52 rounded-full bg-orange-500/10 blur-3xl"></span>
-    <span className="pointer-events-none absolute -bottom-20 -left-12 w-52 h-52 rounded-full bg-red-600/10 blur-3xl"></span>
+  <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-blue-950 via-slate-900 to-red-950 border border-white/10 p-5 sm:p-8 mb-10 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+    {/* Blue glow top-left, red glow bottom-right (behind the image) */}
+    <span className="pointer-events-none absolute -top-16 -left-10 w-56 h-56 rounded-full bg-blue-500/25 blur-3xl"></span>
+    <span className="pointer-events-none absolute -bottom-20 -right-10 w-64 h-64 rounded-full bg-red-600/25 blur-3xl"></span>
+    {/* Top hairline: blue to red */}
+    <span className="pointer-events-none absolute top-0 inset-x-0 h-px bg-gradient-to-r from-blue-400/50 via-white/20 to-[#FF4B5C]/50"></span>
 
     <div className="relative flex flex-col sm:flex-row sm:items-center gap-6">
       <div className="flex-1 min-w-0">
-        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-orange-400 bg-white/5 border border-orange-500/30 px-2.5 py-1 rounded-[5px] mb-3">
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-rose-300 bg-white/5 border border-rose-400/30 px-2.5 py-1 rounded-[5px] mb-3">
           <i className="fa-solid fa-wand-magic-sparkles text-[10px]"></i> Instant AI resume builder, no account needed.
         </span>
         <h2 className="text-[22px] sm:text-[28px] md:text-[32px] font-black text-white leading-tight tracking-tight mb-2">
           Build a resume that gets you hired.
         </h2>
-        <p className="text-[13px] text-neutral-300 leading-relaxed max-w-md mb-5">
+        <p className="text-[13px] text-slate-300 leading-relaxed max-w-md mb-5">
           100% free and completely private. Easily build and save multiple tailored resume versions directly to your device with full data confidentiality.
         </p>
 
         <div className="flex flex-wrap gap-2.5">
-<button
+          <button
   onClick={() => navigate('/ResumeBuilder')}
-  className="group relative w-full sm:w-auto h-[52px] px-7 rounded-2xl bg-gradient-to-b from-orange-500 to-orange-600 border border-orange-400/30 text-white text-[13px] font-bold tracking-wide transition-all duration-200 hover:-translate-y-0.5 hover:from-orange-500 hover:to-orange-500 active:translate-y-0 active:scale-[0.97] flex items-center justify-center gap-2.5 overflow-hidden shadow-[0_8px_20px_-6px_rgba(234,88,12,0.5)]"
+  className="group relative w-full sm:w-auto h-[52px] px-7 rounded-2xl bg-gradient-to-b from-orange-600 to-orange-700 border border-orange-500/40 text-white text-[13px] font-bold tracking-wide transition-all duration-200 hover:-translate-y-0.5 hover:from-orange-500 hover:to-orange-600 active:translate-y-0 active:scale-[0.97] flex items-center justify-center gap-2.5 overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_8px_20px_-6px_rgba(234,88,12,0.55)]"
 >
   {/* Diagonal shimmer sweep on hover */}
   <span className="pointer-events-none absolute inset-y-0 -left-1/2 w-1/3 bg-gradient-to-r from-transparent via-white/25 to-transparent skew-x-[-20deg] -translate-x-[200%] group-hover:translate-x-[500%] transition-transform duration-[1100ms] ease-out"></span>
 
   {/* Icon in its own chip */}
-  <span className="relative w-6 h-6 rounded-full bg-black/25 border border-white/20 flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:rotate-90">
+  <span className="relative w-6 h-6 rounded-full bg-orange-950/40 border border-white/20 flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:rotate-90">
     <i className="fa-solid fa-plus text-[10px]"></i>
   </span>
 
@@ -1156,7 +1215,7 @@ useEffect(() => {
                 <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                   <i className="fa-solid fa-cloud-arrow-up text-xl text-red-400"></i>
                 </div>
-                <p className="text-slate-300 text-sm font-medium">Drop PDFs here or tap to browse</p>
+                <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 <p className="text-slate-500 text-xs mt-1">Select two or more files to combine</p>
               </div>
             )}
@@ -1262,7 +1321,7 @@ useEffect(() => {
                 <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                   <i className="fa-solid fa-cloud-arrow-up text-xl text-emerald-400"></i>
                 </div>
-                <p className="text-slate-300 text-sm font-medium">Drop a PDF here or tap to browse</p>
+                <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 <p className="text-slate-500 text-xs mt-1">Split it into single-page files</p>
               </div>
             )}
@@ -1343,7 +1402,7 @@ useEffect(() => {
                 <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                   <i className="fa-solid fa-compress text-xl text-blue-400"></i>
                 </div>
-                <p className="text-slate-300 text-sm font-medium">Drop a heavy PDF here or tap to browse</p>
+                <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 <p className="text-slate-500 text-xs mt-1">We'll shrink the file size for you</p>
               </div>
             )}
@@ -1435,7 +1494,7 @@ useEffect(() => {
                 <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                   <i className="fa-solid fa-cloud-arrow-up text-xl text-purple-400"></i>
                 </div>
-                <p className="text-slate-300 text-sm font-medium">Drop images here or tap to browse</p>
+                <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 <p className="text-slate-500 text-xs mt-1">Convert JPG, PNG, or WEBP into a PDF</p>
               </div>
             )}
@@ -1515,7 +1574,7 @@ useEffect(() => {
                 <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                   <i className="fa-solid fa-cloud-arrow-up text-xl text-blue-400"></i>
                 </div>
-                <p className="text-slate-300 text-sm font-medium">Drop a PDF here or tap to browse</p>
+                <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 <p className="text-slate-500 text-xs mt-1">Convert its pages into image files</p>
               </div>
             )}
@@ -1730,7 +1789,7 @@ useEffect(() => {
                 <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                   <i className="fa-solid fa-cloud-arrow-up text-xl text-amber-400"></i>
                 </div>
-                <p className="text-slate-300 text-sm font-medium">Drop images here or tap to browse</p>
+                <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 <p className="text-slate-500 text-xs mt-1">JPG, PNG, or WEBP supported</p>
               </div>
             )}
@@ -1822,7 +1881,7 @@ useEffect(() => {
                 <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                   <i className="fa-solid fa-cloud-arrow-up text-xl text-indigo-400"></i>
                 </div>
-                <p className="text-slate-300 text-sm font-medium">Drop a PDF here or tap to browse</p>
+                <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 <p className="text-slate-500 text-xs mt-1">Get an editable Word document</p>
               </div>
             )}
@@ -1903,7 +1962,7 @@ useEffect(() => {
                 <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                   <i className="fa-solid fa-cloud-arrow-up text-xl text-teal-400"></i>
                 </div>
-                <p className="text-slate-300 text-sm font-medium">Drop a PDF here or tap to browse</p>
+                <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 <p className="text-slate-500 text-xs mt-1">Tables and lists become an Excel file</p>
               </div>
             )}
@@ -1986,7 +2045,7 @@ useEffect(() => {
                 <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                   <i className="fa-solid fa-cloud-arrow-up text-xl text-blue-400"></i>
                 </div>
-                <p className="text-slate-300 text-sm font-medium">Drop a Word file here or tap to browse</p>
+                <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 <p className="text-slate-500 text-xs mt-1">Accepts .doc and .docx files</p>
               </div>
             )}
@@ -2070,7 +2129,7 @@ useEffect(() => {
                 <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                   <i className="fa-solid fa-cloud-arrow-up text-xl text-green-400"></i>
                 </div>
-                <p className="text-slate-300 text-sm font-medium">Drop an Excel file here or tap to browse</p>
+                <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 <p className="text-slate-500 text-xs mt-1">Accepts .xls and .xlsx files</p>
               </div>
             )}
@@ -2149,7 +2208,7 @@ useEffect(() => {
                 <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                   <i className="fa-solid fa-cloud-arrow-up text-xl text-violet-400"></i>
                 </div>
-                <p className="text-slate-300 text-sm font-medium">Drop a PDF here or tap to browse</p>
+                <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 <p className="text-slate-500 text-xs mt-1">Select a document to encrypt</p>
               </div>
             )}
@@ -2246,7 +2305,7 @@ useEffect(() => {
                   <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                     <i className="fa-solid fa-cloud-arrow-up text-xl text-cyan-400"></i>
                   </div>
-                  <p className="text-slate-300 text-sm font-medium">Drop a protected PDF here or tap to browse</p>
+                  <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 </div>
               )}
               <div className={`mt-5 px-5 py-2 rounded-xl text-xs font-semibold transition-colors duration-200
@@ -2371,7 +2430,7 @@ useEffect(() => {
                   <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                     <i className="fa-solid fa-cloud-arrow-up text-xl text-rose-400"></i>
                   </div>
-                  <p className="text-slate-300 text-sm font-medium">Drop the encrypted PDF here or tap to browse</p>
+                  <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                 </div>
               )}
               <div className={`mt-5 px-5 py-2 rounded-xl text-xs font-semibold transition-colors duration-200
@@ -2513,7 +2572,7 @@ useEffect(() => {
                     <div className="w-14 h-14 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                       <i className="fa-solid fa-cloud-arrow-up text-xl text-orange-400"></i>
                     </div>
-                    <p className="text-slate-300 text-sm font-medium">Drop a PDF here or tap to browse</p>
+                    <p className="text-slate-300 text-sm font-medium">Tap to browse</p>
                     <p className="text-slate-500 text-xs mt-1">Convert it into an editable slide deck</p>
                   </div>
                 )}

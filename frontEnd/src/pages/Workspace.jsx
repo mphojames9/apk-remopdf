@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { PDFDocument, rgb, degrees, StandardFonts } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
 import "pdfjs-dist/build/pdf.worker.mjs";
@@ -20,6 +20,48 @@ const FONT_FAMILIES = [
   { id: "TimesRoman", label: "Times New Roman", css: '"Times New Roman", Times, serif' },
   { id: "Courier", label: "Courier", css: '"Courier New", Courier, monospace' },
 ];
+
+// --- Page numbers -------------------------------------------------------------
+// Stamped onto every kept page at download time, like the watermark. A page's
+// number is its place in the downloaded PDF (after pages have been deleted,
+// added or reordered), not its number in the original file.
+const PAGE_NUMBER_POSITIONS = [
+  { id: "top-left", label: "Top left", v: "top", h: "left" },
+  { id: "top-center", label: "Top center", v: "top", h: "center" },
+  { id: "top-right", label: "Top right", v: "top", h: "right" },
+  { id: "bottom-left", label: "Bottom left", v: "bottom", h: "left" },
+  { id: "bottom-center", label: "Bottom center", v: "bottom", h: "center" },
+  { id: "bottom-right", label: "Bottom right", v: "bottom", h: "right" },
+];
+const DEFAULT_PAGE_NUMBER_POSITION = PAGE_NUMBER_POSITIONS[4];
+const PAGE_NUMBER_FORMATS = [
+  { id: "n", label: "1" },
+  { id: "page-n", label: "Page 1" },
+  { id: "n-of-total", label: "1 / 10" },
+  { id: "page-n-of-total", label: "Page 1 of 10" },
+];
+const PAGE_NUMBER_SIZES = [8, 10, 12, 14, 16, 20];
+const PAGE_NUMBER_MARGIN_PT = 28; // page edge to the nearest edge of the number's digits
+const HELVETICA_DIGIT_HEIGHT = 0.716; // digit height as a fraction of the font size
+
+// `startAt` is kept as typed so the box can be cleared while editing.
+function parsePageNumberStart(raw) {
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 99999) : 1;
+}
+
+function formatPageNumber(format, n, last) {
+  switch (format) {
+    case "page-n":
+      return `Page ${n}`;
+    case "n-of-total":
+      return `${n} / ${last}`;
+    case "page-n-of-total":
+      return `Page ${n} of ${last}`;
+    default:
+      return String(n);
+  }
+}
 
 // Highlighter marker colors offered while the Highlight tool is active.
 // Every highlight carries its own opacity (chosen with the slider in the
@@ -745,8 +787,339 @@ function sameDocContents(a, b) {
     sameItems(a.signatures, b.signatures) &&
     sameItems(a.images, b.images) &&
     sameItems(a.textEdits, b.textEdits) &&
-    a.rotations === b.rotations
+    a.rotations === b.rotations &&
+    a.deletedPages === b.deletedPages &&
+    a.addedPages === b.addedPages &&
+    a.pageOrder === b.pageOrder
   );
+}
+
+// Pages added in the editor. A page's number is its identity: the opened file's
+// own pages are 1..N, and each page added afterwards gets the next number up
+// (N + 1, N + 2, ...) for good, whatever position it ends up in. Numbers are
+// therefore no longer the same thing as positions, so anything that needs the
+// display order goes through orderPages().
+//
+// addedPages: [{ id, after, sourceId, sourcePageIndex, width, height }] in
+// creation order — each one is a real page copied out of a file the user
+// uploaded (see AddPagesDialog / insertPagesFromFiles), not a blank sheet.
+// `sourceId` points into `addedSources` (the parsed file it came from),
+// `sourcePageIndex` is its 0-based page number within that file, and
+// `width`/`height` (PDF points, unrotated) are cached from it so the page's
+// slot in the list lays out correctly before its thumbnail is ready.
+// `after` is the page number it sits right behind (0 = it leads the document).
+const MAX_PAGES_PER_ADD = 50; // most pages a single "Add pages" action may insert
+
+// Every page number in display order, deleted pages included: the opened file's
+// pages, each added page slotted in behind the page it was anchored to.
+//
+// Once pages have been dragged into a new order, that order is kept whole in
+// `pageOrder` (see movePage) and is the starting point instead. Pages added
+// after that aren't in it yet, so they are still slotted in by their `after`
+// anchor, exactly as above; the next reorder folds them into `pageOrder`.
+function orderPages(fileLength, addedPages, pageOrder = null) {
+  let order;
+  let unplaced = addedPages;
+  if (pageOrder) {
+    const known = new Set(Array.from({ length: fileLength }, (_, i) => i + 1));
+    for (const added of addedPages) known.add(added.id);
+    order = pageOrder.filter((n) => known.has(n));
+    const placed = new Set(order);
+    // The opened file's own pages are always part of the document.
+    for (let n = 1; n <= fileLength; n++) if (!placed.has(n)) order.push(n);
+    unplaced = addedPages.filter((added) => !placed.has(added.id));
+  } else {
+    order = Array.from({ length: fileLength }, (_, i) => i + 1);
+  }
+  for (const added of unplaced) {
+    const anchorAt = added.after === 0 ? -1 : order.indexOf(added.after);
+    const at = added.after !== 0 && anchorAt === -1 ? order.length : anchorAt + 1;
+    order.splice(at, 0, added.id);
+  }
+  return order;
+}
+
+// The page to land on when the one being viewed is no longer in the document:
+// the next page after it (in display order) that survives, or, if it was at the
+// end, the closest one before it. `before` is the display order it disappeared
+// from, `after` the pages that are left.
+function nearestKeptPage(before, after, from) {
+  const keep = new Set(after);
+  const at = before.indexOf(from);
+  if (at !== -1) {
+    for (let i = at + 1; i < before.length; i++) if (keep.has(before[i])) return before[i];
+    for (let i = at - 1; i >= 0; i--) if (keep.has(before[i])) return before[i];
+  }
+  return after[0];
+}
+
+// --- Reordering pages ---------------------------------------------------------
+// Drag a thumbnail in the pages list to a new place. It has to work with a finger
+// as well as a mouse, inside a list that itself scrolls, so:
+//   - the grip on a thumbnail picks it up as soon as it moves (the grip opts out
+//     of the browser's own scrolling with touch-action: none, so a finger can drag it);
+//   - on a touch screen the thumbnail itself is picked up by press-and-hold, the
+//     same idea as touch highlighting: a plain swipe on it still scrolls the list;
+//   - with a mouse or pen the thumbnail itself is picked up by simply dragging it.
+// While a page is held it follows the pointer (a transform, so nothing else in the
+// list moves and every slot stays where it was), a line marks where it will land,
+// and the list scrolls by itself when the pointer nears its top or bottom edge.
+const REORDER_LONG_PRESS_MS = 320; // hold time before a finger picks a thumbnail up
+const REORDER_TOUCH_SLOP_PX = 10; // finger travel that turns a hold into an ordinary scroll
+const REORDER_GRIP_SLOP_PX = 4; // travel on the grip before it counts as a drag
+const REORDER_BODY_SLOP_PX = 6; // same, for a mouse / pen dragging the thumbnail itself
+const REORDER_GAP_PX = 12; // space between thumbnails in the list (space-y-3)
+
+// Keeps a touch-hold on a thumbnail from turning into a text selection or the
+// browser's own "save image" callout.
+const NO_CALLOUT_STYLE = { WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" };
+
+function getScrollParent(el) {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+  }
+  return null;
+}
+
+// One press-drag-drop on a page thumbnail. Nothing here touches React: it reports
+// through callbacks and cleans up after itself.
+//   pointer   { pointerId, pointerType, clientX, clientY } of the press
+//   list      the element holding the [data-page-item] thumbnails, in display order
+//   pageId    which page was pressed
+//   viaGrip   true when the press was on the grip rather than the thumbnail itself
+//   onStart() the page has been picked up
+//   onMove({ target, lineY })  where it would land: `target` is an index in the list
+//             (null = it would stay where it is), `lineY` the drop line's px from the list's top
+//   onDrop(target)   released over a new place
+//   onEnd(moved)     always last, whether it was dropped, cancelled or never picked up
+// Returns { cancel(), isActive() }.
+function startPageReorder({ pointer, list, pageId, viaGrip, onStart, onMove, onDrop, onEnd }) {
+  const { pointerId, pointerType, clientX: startX, clientY: startY } = pointer;
+  const byFinger = pointerType === "touch";
+  const holdToPick = byFinger && !viaGrip;
+  const slop = viaGrip ? REORDER_GRIP_SLOP_PX : REORDER_BODY_SLOP_PX;
+  const scroller = getScrollParent(list);
+  const startScroll = scroller ? scroller.scrollTop : 0;
+  const body = document.body.style;
+  const saved = { userSelect: body.userSelect, webkitUserSelect: body.webkitUserSelect, cursor: body.cursor };
+
+  let x = startX;
+  let y = startY;
+  let active = false;
+  let done = false;
+  let timer = null;
+  let raf = null;
+  let dragEl = null;
+  let target = null;
+
+  const itemEls = () => Array.from(list.querySelectorAll("[data-page-item]"));
+
+  // Moves the held thumbnail under the pointer and works out where it would land.
+  function update() {
+    const dy = y - startY + (scroller ? scroller.scrollTop - startScroll : 0); // scrolling carries the card along
+    dragEl.style.transform = `translateY(${dy}px)`;
+
+    const els = itemEls();
+    const from = els.indexOf(dragEl);
+    const listTop = list.getBoundingClientRect().top;
+    // Each thumbnail's slot, with the held one measured back where it really sits.
+    const slots = els.map((el) => {
+      const r = el.getBoundingClientRect();
+      const shift = el === dragEl ? dy : 0;
+      return { top: r.top - shift, bottom: r.bottom - shift };
+    });
+
+    // Which gap the pointer is over: 0 = above the first thumbnail, slots.length = below the last.
+    let gap = 0;
+    while (gap < slots.length && (slots[gap].top + slots[gap].bottom) / 2 < y) gap++;
+    const to = gap > from ? gap - 1 : gap; // its index once it has been lifted out of the list
+    target = to === from ? null : to;
+
+    let lineY = null;
+    if (target !== null) {
+      const half = REORDER_GAP_PX / 2;
+      const edge =
+        gap === 0
+          ? slots[0].top - half
+          : gap === slots.length
+            ? slots[gap - 1].bottom + half
+            : (slots[gap - 1].bottom + slots[gap].top) / 2;
+      lineY = Math.round(edge - listTop);
+    }
+    onMove({ target, lineY });
+  }
+
+  function tick() {
+    raf = null;
+    if (!active) return;
+    let moved = false;
+    if (scroller) {
+      const box = scroller.getBoundingClientRect();
+      const step = edgeScrollSpeed(y, box.top, box.bottom);
+      if (step) {
+        const before = scroller.scrollTop;
+        scroller.scrollTop = before + step;
+        moved = scroller.scrollTop !== before;
+      }
+    }
+    update();
+    if (moved && !raf) raf = requestAnimationFrame(tick); // keep going while the pointer rests at the edge
+  }
+
+  function activate() {
+    dragEl = itemEls().find((el) => el.dataset.pageItem === String(pageId)) || null;
+    if (!dragEl) {
+      finish(false);
+      return;
+    }
+    active = true;
+    body.userSelect = "none";
+    body.webkitUserSelect = "none";
+    body.cursor = "grabbing";
+    if (byFinger) {
+      try {
+        if (navigator.vibrate) navigator.vibrate(10);
+      } catch (err) {
+        // not supported here
+      }
+    }
+    onStart();
+    update();
+  }
+
+  function finish(commit) {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    if (raf) cancelAnimationFrame(raf);
+    timer = null;
+    raf = null;
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+    window.removeEventListener("pointercancel", onPointerCancel);
+    window.removeEventListener("keydown", onKeyDown);
+    if (scroller) scroller.removeEventListener("scroll", onScroll);
+    const wasActive = active;
+    active = false;
+    if (dragEl) dragEl.style.transform = "";
+    if (wasActive) {
+      body.userSelect = saved.userSelect;
+      body.webkitUserSelect = saved.webkitUserSelect;
+      body.cursor = saved.cursor;
+    }
+    if (wasActive && commit && target !== null) onDrop(target);
+    onEnd(wasActive);
+  }
+
+  function onPointerMove(e) {
+    if (e.pointerId !== pointerId) return;
+    x = e.clientX;
+    y = e.clientY;
+    if (!active) {
+      const travel = Math.hypot(x - startX, y - startY);
+      if (holdToPick) {
+        if (travel > REORDER_TOUCH_SLOP_PX) finish(false); // moved before the hold finished: they're scrolling, so let them
+      } else if (travel > slop) {
+        activate();
+      }
+      return;
+    }
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+
+  function onPointerUp(e) {
+    if (e.pointerId !== pointerId) return;
+    if (active) {
+      x = e.clientX;
+      y = e.clientY;
+      update();
+    }
+    finish(true);
+  }
+
+  function onPointerCancel(e) {
+    if (e.pointerId === pointerId) finish(false);
+  }
+
+  function onKeyDown(e) {
+    if (e.key === "Escape" && active) finish(false);
+  }
+
+  // The wheel (or anything else) scrolling the list under a held page.
+  function onScroll() {
+    if (active && !raf) raf = requestAnimationFrame(tick);
+  }
+
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerCancel);
+  window.addEventListener("keydown", onKeyDown);
+  if (scroller) scroller.addEventListener("scroll", onScroll, { passive: true });
+  if (holdToPick) {
+    timer = setTimeout(() => {
+      timer = null;
+      activate();
+    }, REORDER_LONG_PRESS_MS);
+  }
+
+  return { cancel: () => finish(false), isActive: () => active };
+}
+
+// Returns a copy of a saved PDF holding only the pages at `order` (0-based page
+// indexes), in that order — which is how deleted pages are dropped and added
+// pages end up where they were put. The pages are copied into a fresh document
+// instead of calling removePage(): removePage() only unlinks a page from the
+// page tree, so its content would still be sitting in the saved file (and
+// still count towards its size) for anyone who goes looking. Copying takes
+// along only what the kept pages actually use.
+async function arrangePages(bytes, order) {
+  const src = await PDFDocument.load(bytes);
+  const out = await PDFDocument.create();
+  const copied = await out.copyPages(src, order);
+  copied.forEach((page) => out.addPage(page));
+
+  // copyPages() carries pages only; keep the basic document info too.
+  const title = src.getTitle();
+  const author = src.getAuthor();
+  const subject = src.getSubject();
+  const keywords = src.getKeywords();
+  const creator = src.getCreator();
+  const created = src.getCreationDate();
+  if (title) out.setTitle(title);
+  if (author) out.setAuthor(author);
+  if (subject) out.setSubject(subject);
+  if (keywords) out.setKeywords(keywords.split(/\s+/).filter(Boolean));
+  if (creator) out.setCreator(creator);
+  if (created) out.setCreationDate(created);
+
+  return out.save();
+}
+
+// Wraps a chosen photo in its own one-page PDF, scaled (never enlarged) to fit
+// within a normal page with a small margin and centered, so "Add pages" can
+// insert an image exactly like any other PDF page — same copy-in-as-a-real-page
+// path pdfjs/pdf-lib use for an uploaded PDF's pages.
+async function imageFileToPdfBytes(file) {
+  const bytes = await file.arrayBuffer();
+  const doc = await PDFDocument.create();
+  const isPng = file.type === "image/png" || /\.png$/i.test(file.name);
+  const embedded = isPng ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+  const landscape = embedded.width > embedded.height;
+  const pageWidth = landscape ? 792 : 612; // US Letter, turned to match the photo
+  const pageHeight = landscape ? 612 : 792;
+  const margin = 36; // half an inch
+  const scale = Math.min((pageWidth - margin * 2) / embedded.width, (pageHeight - margin * 2) / embedded.height, 1);
+  const drawWidth = embedded.width * scale;
+  const drawHeight = embedded.height * scale;
+  const page = doc.addPage([pageWidth, pageHeight]);
+  page.drawImage(embedded, {
+    x: (pageWidth - drawWidth) / 2,
+    y: (pageHeight - drawHeight) / 2,
+    width: drawWidth,
+    height: drawHeight,
+  });
+  return doc.save();
 }
 
 // --- Small inline icons (no icon-library dependency) ------------------------
@@ -771,8 +1144,24 @@ function ZoomOutIcon() { return (<svg {...ICON}><circle cx="11" cy="11" r="7" />
 function RotateLeftIcon() { return (<svg {...ICON}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>); }
 function RotateRightIcon() { return (<svg {...ICON}><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></svg>); }
 function WatermarkIcon() { return (<svg {...ICON}><path d="M6 3h8l5 5v13H6z" /><path d="M14 3v5h5" /><path d="M9.5 17.5l5-5" strokeWidth={3} /></svg>); }
+function TrashIcon() { return (<svg {...ICON}><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /><path d="M10 11v6M14 11v6" /></svg>); }
+function PageNumberIcon() { return (<svg {...ICON}><path d="M6 3h8l5 5v13H6z" /><path d="M14 3v5h5" /><path d="M10 13.5l-.6 4.5M14 13.5l-.6 4.5M8.8 15h6M8.6 17h6" /></svg>); }
+function AddPageIcon() { return (<svg {...ICON}><path d="M6 3h8l5 5v13H6z" /><path d="M14 3v5h5" /><path d="M12.5 12v6M9.5 15h6" /></svg>); }
+function GripIcon() { return (<svg {...ICON} fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>); }
 
-function ToolButton({ active, disabled, onClick, title, children }) {
+// A miniature page with a dot where the number will sit (position picker).
+function PositionGlyph({ v, h }) {
+  return (
+    <span className="relative block w-6 h-8 rounded-[3px] border border-current" aria-hidden="true">
+      <span
+        className="absolute w-2.5 h-1 rounded-full bg-current"
+        style={{ [v]: 3, ...(h === "center" ? { left: "50%", transform: "translateX(-50%)" } : { [h]: 3 }) }}
+      />
+    </span>
+  );
+}
+
+function ToolButton({ active, disabled, danger, onClick, title, children }) {
   return (
     <button
       type="button"
@@ -780,8 +1169,12 @@ function ToolButton({ active, disabled, onClick, title, children }) {
       disabled={disabled}
       title={title}
       className={`flex flex-col items-center justify-center gap-0.5 px-3 py-1.5 rounded-md text-[10px] font-medium shrink-0 min-w-[56px] ${
-        active ? "bg-blue-50 text-blue-700" : "text-neutral-600 hover:bg-neutral-100"
-      } disabled:opacity-40 disabled:cursor-not-allowed`}
+        active
+          ? "bg-blue-50 text-blue-700"
+          : danger
+            ? "text-red-600 hover:bg-red-50"
+            : "text-neutral-600 hover:bg-neutral-100"
+      } touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed`}
     >
       {children}
       <span>{title}</span>
@@ -905,6 +1298,168 @@ function SignaturePad({ onSave, onClose }) {
   );
 }
 
+const ADD_PAGES_ACCEPT = "application/pdf,image/png,image/jpeg,.pdf,.png,.jpg,.jpeg";
+function isPickableForAddPages(file) {
+  return (
+    file.type === "application/pdf" ||
+    file.type === "image/png" ||
+    file.type === "image/jpeg" ||
+    /\.(pdf|png|jpe?g)$/i.test(file.name)
+  );
+}
+
+// "Add pages" dialog: which file(s) to pull pages from, and where they go.
+// `onAdd({ files, position })` — files are the File objects the user picked
+// (PDFs are inserted page-for-page, images become one page apiece); position
+// is "after" (the page being viewed), "start" or "end". `onAdd` is async and
+// resolves to { ok, message } — the dialog stays open and shows `message` on
+// failure (an unreadable file, too many pages) instead of closing.
+function AddPagesDialog({ currentPageLabel, onAdd, onClose }) {
+  const [files, setFiles] = useState([]);
+  const [position, setPosition] = useState("after");
+  const [busy, setBusy] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef(null);
+
+  const addFiles = (list) => {
+    const picked = Array.from(list || []).filter(isPickableForAddPages);
+    if (picked.length) {
+      setFiles((prev) => [...prev, ...picked]);
+      setErrorMsg("");
+    }
+  };
+  const removeFile = (idx) => setFiles((prev) => prev.filter((_, i) => i !== idx));
+
+  const submit = async () => {
+    if (files.length === 0 || busy) return;
+    setBusy(true);
+    setErrorMsg("");
+    try {
+      const result = await onAdd({ files, position });
+      if (result?.ok) onClose();
+      else setErrorMsg(result?.message || "Couldn't add those pages.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, busy]);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !busy) onClose();
+      }}
+    >
+      <div role="dialog" aria-label="Add pages" className="bg-white rounded-lg shadow-xl w-full max-w-sm p-4">
+        <h3 className="text-sm font-semibold mb-1">Add pages</h3>
+        <p className="text-xs text-neutral-500 mb-3">
+          Upload a PDF or a photo to insert as new pages in this document.
+        </p>
+
+        <div className="space-y-3">
+          <div
+            onClick={() => !busy && inputRef.current?.click()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!busy) setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              if (!busy) addFiles(e.dataTransfer.files);
+            }}
+            className={`rounded-md border border-dashed px-3 py-4 text-center text-xs ${
+              busy
+                ? "opacity-50 cursor-not-allowed border-neutral-300 text-neutral-400"
+                : dragOver
+                ? "cursor-pointer border-blue-400 bg-blue-50 text-blue-600"
+                : "cursor-pointer border-neutral-300 text-neutral-500 hover:border-neutral-400"
+            }`}
+          >
+            Tap to choose a file, or drop it here
+            <input
+              ref={inputRef}
+              type="file"
+              accept={ADD_PAGES_ACCEPT}
+              multiple
+              disabled={busy}
+              className="hidden"
+              onChange={(e) => {
+                addFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+
+          {files.length > 0 && (
+            <ul className="space-y-1 max-h-32 overflow-y-auto">
+              {files.map((f, i) => (
+                <li
+                  key={`${f.name}_${i}`}
+                  className="flex items-center justify-between gap-2 text-xs bg-neutral-50 border border-neutral-200 rounded px-2 py-1"
+                >
+                  <span className="truncate">{f.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeFile(i)}
+                    disabled={busy}
+                    className="text-neutral-400 hover:text-red-500 shrink-0 disabled:opacity-40"
+                    title="Remove"
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <label className="block text-xs text-neutral-600">
+            Where
+            <select
+              value={position}
+              onChange={(e) => setPosition(e.target.value)}
+              className="mt-1 w-full text-sm border border-neutral-300 rounded px-2 py-1.5"
+            >
+              <option value="after">After this page{currentPageLabel > 0 ? ` (page ${currentPageLabel})` : ""}</option>
+              <option value="start">At the beginning</option>
+              <option value="end">At the end</option>
+            </select>
+          </label>
+
+          {errorMsg && <p className="text-xs text-red-600">{errorMsg}</p>}
+        </div>
+
+        <div className="flex justify-end gap-2 mt-4">
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-md border border-neutral-300 text-sm disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={files.length === 0 || busy}
+            className="px-3 py-1.5 rounded-md bg-neutral-900 text-white text-sm disabled:opacity-40"
+          >
+            {busy ? "Adding…" : files.length > 1 ? `Add ${files.length} files` : "Add page"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PdfFillerApp() {
   const [pdfBytes, setPdfBytes] = useState(null); // ArrayBuffer of the original PDF
   const [fileName, setFileName] = useState("");
@@ -913,7 +1468,18 @@ export default function PdfFillerApp() {
   const [numPages, setNumPages] = useState(0);
   const [viewport, setViewport] = useState(null); // current render viewport
   const [zoom, setZoom] = useState(1);
-  const [thumbnails, setThumbnails] = useState([]); // dataURLs, index 0 = page 1
+  const [thumbnails, setThumbnails] = useState({}); // dataURLs keyed by page id (original pages and added ones alike)
+
+  // Files uploaded via "Add pages", keyed by the sourceId their addedPages
+  // entries point at: { [sourceId]: { name, bytes, doc } }. `bytes` is what
+  // Download embeds real page content from (via pdf-lib copyPages); `doc` is
+  // the parsed pdf.js document the editor renders those pages from — so an
+  // inserted page behaves like any other page (thumbnail, zoom, rotate, text
+  // selection, edit-existing-text) instead of a blank placeholder. Kept
+  // outside `doc`/undo history for the same reason `pdfBytes` is: it's a
+  // loaded asset, not an edit to describe.
+  const [addedSources, setAddedSources] = useState({});
+  const nextSourceIdRef = useRef(1);
 
   // Existing text detected in the PDF itself (via pdf.js text extraction),
   // cached per page so revisiting a page doesn't re-read it. Shape:
@@ -938,13 +1504,60 @@ export default function PdfFillerApp() {
   //              text selection while the Highlight tool is active.
   // rotations:  { [pageNum]: 90 | 180 | 270 } — the clockwise turn added to a page
   //              in the editor, on top of the PDF's own /Rotate (absent = none).
-  const [doc, setDoc] = useState({ fields: [], signatures: [], images: [], textEdits: [], highlights: [], rotations: {} });
+  // deletedPages: [pageNum, …] (sorted) — pages dropped in the editor. `pageNum` and
+  //              every item's `page` keep meaning "page N of the file that was
+  //              opened"; only what's shown (page list, Page X / Y, prev/next,
+  //              the element lists) and what's exported skips these pages.
+  // addedPages: [{ id, after, sourceId, sourcePageIndex, width, height }] —
+  //              real pages inserted from an uploaded file (see orderPages
+  //              and addedSources above). An added page's `id` is its page
+  //              number, just past the opened file's own (numPages + 1, +2,
+  //              ...), so items, rotations and deletedPages refer to it
+  //              exactly as they do to any other page; `after` says where it
+  //              sits. Entries are never removed — deleting an added page
+  //              puts its id in deletedPages — so ids stay consecutive and
+  //              Undo/Redo bring it back intact.
+  // pageOrder:  null | [pageNum, …] — every page number (deleted ones too) in the order
+  //              the person dragged them into. null = never reordered, so the order
+  //              is just the file's pages with any added ones slotted in (orderPages).
+  //              Only the display/export order changes: `pageNum` and every item's
+  //              `page` still mean "page N of the file that was opened".
+  const [doc, setDoc] = useState({ fields: [], signatures: [], images: [], textEdits: [], highlights: [], rotations: {}, deletedPages: [], addedPages: [], pageOrder: null });
   const docRef = useRef(doc);
   docRef.current = doc;
-  const { fields, signatures, images, textEdits, highlights, rotations } = doc;
+  const { fields, signatures, images, textEdits, highlights, rotations, deletedPages, addedPages, pageOrder } = doc;
+
+  // The pages still in the document, as page numbers, in the order they're shown
+  // and exported (which is not numeric order once pages have been added).
+  const deletedSet = useMemo(() => new Set(deletedPages), [deletedPages]);
+  const addedById = useMemo(() => new Map(addedPages.map((p) => [p.id, p])), [addedPages]);
+  const visiblePages = useMemo(
+    () => orderPages(numPages, addedPages, pageOrder).filter((n) => !deletedSet.has(n)),
+    [numPages, addedPages, pageOrder, deletedSet]
+  );
+  const pagePosition = visiblePages.indexOf(pageNum) + 1; // where the current page sits among them (1-based)
+  const pageLabel = (n) => visiblePages.indexOf(n) + 1; // the number a page has in the downloaded PDF
+  const onKeptPage = (item) => !deletedSet.has(item.page);
   const pageRotation = rotations[pageNum] || 0; // current page's added turn
   // Existing-text detection depends on how the page is turned, so it's cached per rotation.
   const textIndexKey = `${pageNum}:${pageRotation}`;
+
+  // The pdf.js page proxy for a page number, whichever document it actually
+  // lives in — the opened file, or (for an added page) the file it was
+  // uploaded from. This is what lets an inserted page render, thumbnail, and
+  // support text selection / edit-existing-text exactly like any other page.
+  const getPageProxy = useCallback(
+    (n) => {
+      const added = addedById.get(n);
+      if (added) {
+        const source = addedSources[added.sourceId];
+        if (!source) return Promise.reject(new Error("That inserted page isn't available."));
+        return source.doc.getPage(added.sourcePageIndex + 1);
+      }
+      return pdfDoc.getPage(n);
+    },
+    [addedById, addedSources, pdfDoc]
+  );
 
   // --- Undo / redo -----------------------------------------------------------
   const undoStackRef = useRef([]);
@@ -1035,6 +1648,21 @@ export default function PdfFillerApp() {
   const [mobileElementsOpen, setMobileElementsOpen] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
+  // Deleting pages: "Select" mode in the pages list (tap thumbnails, delete them
+  // together) and the "Page deleted · Undo" snackbar that follows a deletion.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedPages, setSelectedPages] = useState([]); // page numbers of the opened file
+  const [showAddPages, setShowAddPages] = useState(false); // the "Add blank pages" dialog
+  const [deleteToast, setDeleteToast] = useState(null); // { count, before } — `before` is the doc it can undo back to
+
+  // Reordering pages: drag a thumbnail in the pages list (see startPageReorder).
+  // `pageSort` is the drag in progress, for drawing it: which page is held, where
+  // it would land (`to`, an index among the pages shown; null = it would stay put)
+  // and where the drop line goes (`lineY`, px down from the top of the list).
+  const [pageSort, setPageSort] = useState(null); // { id, to, lineY } | null
+  const reorderGestureRef = useRef(null); // { cancel, isActive } for the press in progress
+  const justSortedRef = useRef(false); // swallows the click a mouse release sends to the thumbnail it just dragged
+
   // Watermark: baked into every page at download time (no on-page element
   // to place/drag, since it's meant to cover the whole page uniformly).
   // Off until the person turns it on from the Watermark button in the top bar.
@@ -1047,6 +1675,28 @@ export default function PdfFillerApp() {
     opacity: 0.3,
     rotation: 45, // degrees, counter-clockwise
   });
+
+  // Page numbers: also baked in at download time. Off until turned on from the
+  // Page numbers button in the top bar (or the More menu on narrow screens).
+  const [showPageNumberPanel, setShowPageNumberPanel] = useState(false);
+  const [pageNumbers, setPageNumbers] = useState({
+    enabled: false,
+    position: DEFAULT_PAGE_NUMBER_POSITION.id,
+    format: "n",
+    startAt: "1", // the number the first page gets
+    fontSize: 12,
+    color: "#333333",
+    skipFirst: false, // leave the first page (a cover, say) bare; it still counts
+  });
+
+  // The text stamped on the page that sits at `position` (1-based) in the
+  // downloaded PDF, or null when that page gets no number.
+  const pageNumberText = (position) => {
+    if (!pageNumbers.enabled || position < 1) return null; // position 0 = a deleted page
+    if (pageNumbers.skipFirst && position === 1) return null;
+    const first = parsePageNumberStart(pageNumbers.startAt);
+    return formatPageNumber(pageNumbers.format, first + position - 1, first + visiblePages.length - 1);
+  };
 
   const canvasRef = useRef(null);
   const textLayerRef = useRef(null); // invisible selectable-text layer (Select tool)
@@ -1076,8 +1726,13 @@ export default function PdfFillerApp() {
       setNumPages(parsed.numPages);
       setPageNum(1);
       setZoom(1);
-      setDoc({ fields: [], signatures: [], images: [], textEdits: [], highlights: [], rotations: {} });
+      setDoc({ fields: [], signatures: [], images: [], textEdits: [], highlights: [], rotations: {}, deletedPages: [], addedPages: [], pageOrder: null });
+      setAddedSources({});
       setPageTextIndex({});
+      setShowAddPages(false);
+      setSelectMode(false);
+      setSelectedPages([]);
+      setDeleteToast(null);
       undoStackRef.current = [];
       redoStackRef.current = [];
       setHistoryVersion((v) => v + 1);
@@ -1101,7 +1756,10 @@ export default function PdfFillerApp() {
     (async () => {
       setIsRendering(true);
       try {
-        const page = await pdfDoc.getPage(pageNum);
+        // Whether this page came from the opened file or was inserted via
+        // "Add pages", getPageProxy hands back a real pdf.js page, so it
+        // renders the same way either way.
+        const page = await getPageProxy(pageNum);
         const scale = 1.4 * zoom;
         const vp = page.getViewport({ scale, rotation: normalizeRotation(page.rotate + pageRotation) });
         if (cancelled) return;
@@ -1124,7 +1782,7 @@ export default function PdfFillerApp() {
     return () => {
       cancelled = true;
     };
-  }, [pdfDoc, pageNum, zoom, pageRotation]);
+  }, [pdfDoc, pageNum, zoom, pageRotation, getPageProxy]);
 
   // --- Detect existing text on the current page, so it can be edited -------
   // Reads each text run's position via pdf.js at scale 1 (i.e. in PDF point
@@ -1136,7 +1794,7 @@ export default function PdfFillerApp() {
 
     (async () => {
       try {
-        const page = await pdfDoc.getPage(pageNum);
+        const page = await getPageProxy(pageNum);
         // Parsing the page's content is what loads its fonts into
         // page.commonObjs (name, bold/italic/serif/mono flags). The render
         // effect does the same work and pdf.js shares it, so this is cheap.
@@ -1210,7 +1868,7 @@ export default function PdfFillerApp() {
     return () => {
       cancelled = true;
     };
-  }, [pdfDoc, pageNum, pageRotation, textIndexKey, pageTextIndex]);
+  }, [pdfDoc, pageNum, pageRotation, textIndexKey, pageTextIndex, getPageProxy]);
 
   // --- Selectable text layer (Select tool) ------------------------------------
   // With the Select or Highlight tool active, an invisible layer of the page's
@@ -1232,7 +1890,7 @@ export default function PdfFillerApp() {
 
     (async () => {
       try {
-        const page = await pdfDoc.getPage(pageNum);
+        const page = await getPageProxy(pageNum);
         const textContent = await page.getTextContent();
         if (cancelled) return;
 
@@ -1285,7 +1943,7 @@ export default function PdfFillerApp() {
       container.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("selectionchange", onSelectionChange);
     };
-  }, [pdfDoc, pageNum, viewport, canSelectText]);
+  }, [pdfDoc, pageNum, viewport, canSelectText, getPageProxy]);
 
   // Turns client rects (one per stretch of a line) into stored highlights on the
   // current page, in whatever color and opacity are picked right now.
@@ -1361,31 +2019,34 @@ export default function PdfFillerApp() {
   }, [activeTool, canSelectText, addHighlightsFromRects]);
 
   // --- Low-res page thumbnails for the sidebar / mobile drawer -------------
-  // Each one is drawn with its page's rotation applied. Turning a page redraws
-  // only that page's thumbnail; the others are kept.
+  // Each one is drawn with its page's rotation applied, keyed by page id so
+  // both the opened file's own pages and any added/inserted ones share the
+  // same cache. Turning a page redraws only that page's thumbnail; the others
+  // are kept.
   const thumbSourceRef = useRef(null); // the pdf.js document the thumbnails belong to
   const thumbRotationsRef = useRef({}); // rotation each page's thumbnail was drawn with
   useEffect(() => {
     if (!pdfDoc) {
       thumbSourceRef.current = null;
       thumbRotationsRef.current = {};
-      setThumbnails([]);
+      setThumbnails({});
       return;
     }
     if (thumbSourceRef.current !== pdfDoc) {
       thumbSourceRef.current = pdfDoc;
       thumbRotationsRef.current = {};
-      setThumbnails(new Array(pdfDoc.numPages).fill(null));
+      setThumbnails({});
     }
     let cancelled = false;
+    const pageIds = [...Array.from({ length: pdfDoc.numPages }, (_, i) => i + 1), ...addedPages.map((p) => p.id)];
 
     (async () => {
-      for (let i = 1; i <= pdfDoc.numPages; i++) {
+      for (const id of pageIds) {
         if (cancelled) return;
-        const turn = rotations[i] || 0;
-        if (thumbRotationsRef.current[i] === turn) continue; // already drawn this way
+        const turn = rotations[id] || 0;
+        if (thumbRotationsRef.current[id] === turn) continue; // already drawn this way
         try {
-          const page = await pdfDoc.getPage(i);
+          const page = await getPageProxy(id);
           const vp = page.getViewport({ scale: 0.22, rotation: normalizeRotation(page.rotate + turn) });
           const canvas = document.createElement("canvas");
           canvas.width = vp.width;
@@ -1394,14 +2055,10 @@ export default function PdfFillerApp() {
           await page.render({ canvasContext: ctx, viewport: vp }).promise;
           const dataUrl = canvas.toDataURL("image/png");
           if (cancelled) return;
-          thumbRotationsRef.current[i] = turn;
-          setThumbnails((prev) => {
-            const next = prev.slice();
-            next[i - 1] = dataUrl;
-            return next;
-          });
+          thumbRotationsRef.current[id] = turn;
+          setThumbnails((prev) => ({ ...prev, [id]: dataUrl }));
         } catch (err) {
-          console.error("Couldn't render a thumbnail for page", i, err);
+          console.error("Couldn't render a thumbnail for page", id, err);
         }
       }
     })();
@@ -1409,7 +2066,7 @@ export default function PdfFillerApp() {
     return () => {
       cancelled = true;
     };
-  }, [pdfDoc, rotations]);
+  }, [pdfDoc, rotations, addedPages, getPageProxy]);
 
   // --- Click the page: place a pending signature/image, or drop a field ----
   const handleStageClick = useCallback(
@@ -1580,7 +2237,8 @@ export default function PdfFillerApp() {
   const rotatePages = useCallback(
     (pageNumbers, degreesCW) => {
       if (!pdfDoc || !Number.isInteger(degreesCW / 90) || normalizeRotation(degreesCW) === 0) return;
-      const targets = [].concat(pageNumbers).filter((n) => Number.isInteger(n) && n >= 1 && n <= pdfDoc.numPages);
+      const exists = new Set(orderPages(pdfDoc.numPages, docRef.current.addedPages));
+      const targets = [].concat(pageNumbers).filter((n) => exists.has(n));
       if (targets.length === 0) return;
       snapshotHistory();
       setDoc((prev) => {
@@ -1594,6 +2252,253 @@ export default function PdfFillerApp() {
       });
     },
     [pdfDoc, snapshotHistory]
+  );
+
+  // --- Delete pages ------------------------------------------------------------
+  // Takes one page number (or an array of them) and drops those pages from the
+  // document. Like rotatePages, nothing in the PDF changes until Download: the
+  // numbers go into `doc.deletedPages`, so it's undoable, and whatever was placed
+  // on a deleted page stays in `doc` and comes back with the page on Undo. At
+  // least one page always has to remain; a request that would remove them all
+  // does nothing.
+  //   deletePages(pageNum)        this page
+  //   deletePages([2, 5, 6])      several at once
+  const deletePages = useCallback(
+    (pageNumbers) => {
+      if (!pdfDoc) return;
+      const current = docRef.current;
+      const already = new Set(current.deletedPages);
+      const inDocument = orderPages(pdfDoc.numPages, current.addedPages, current.pageOrder); // every page in order, deleted or not
+      const exists = new Set(inDocument);
+      const targets = [...new Set([].concat(pageNumbers))].filter((n) => exists.has(n) && !already.has(n));
+      if (targets.length === 0) return;
+      const before = inDocument.filter((n) => !already.has(n));
+      const remaining = before.filter((n) => !targets.includes(n));
+      if (remaining.length === 0) return;
+
+      snapshotHistory();
+      setDoc((prev) => ({ ...prev, deletedPages: [...prev.deletedPages, ...targets].sort((a, b) => a - b) }));
+      // If the page being viewed went, move on to the closest one that's left.
+      setPageNum((cur) => (targets.includes(cur) ? nearestKeptPage(before, remaining, cur) : cur));
+      // Let go of a selected element that lived on a deleted page.
+      const goneIds = new Set(
+        [...current.fields, ...current.signatures, ...current.images, ...current.textEdits, ...current.highlights]
+          .filter((item) => targets.includes(item.page))
+          .map((item) => item.id)
+      );
+      setActiveId((cur) => (goneIds.has(cur) ? null : cur));
+      setHighlightDraft(null);
+      setDeleteToast({ count: targets.length, before: current });
+    },
+    [pdfDoc, snapshotHistory]
+  );
+
+  // --- Reorder pages -----------------------------------------------------------
+  // Moves one page so that it ends up at `toIndex` among the pages that are shown
+  // (0 = first). Like rotate and delete, nothing in the PDF changes until Download:
+  // the new order goes into `doc.pageOrder`, so it's one undoable step, and export
+  // writes the pages out in that order. Deleted pages stay in the order too (in the
+  // slots they already held) so Undo can put them back where they were.
+  //   movePage(3, 0)     make page 3 the first page
+  const movePage = useCallback(
+    (pageId, toIndex) => {
+      if (!pdfDoc || !Number.isInteger(toIndex)) return;
+      const current = docRef.current;
+      const deleted = new Set(current.deletedPages);
+      const full = orderPages(pdfDoc.numPages, current.addedPages, current.pageOrder); // every page, deleted or not
+      const shown = full.filter((n) => !deleted.has(n));
+      const from = shown.indexOf(pageId);
+      const to = Math.max(0, Math.min(shown.length - 1, toIndex));
+      if (from === -1 || from === to) return;
+
+      const reshuffled = shown.slice();
+      reshuffled.splice(from, 1);
+      reshuffled.splice(to, 0, pageId);
+      // Hand the shown pages their new order, leaving deleted pages in their own slots.
+      let next = 0;
+      const nextOrder = full.map((n) => (deleted.has(n) ? n : reshuffled[next++]));
+
+      snapshotHistory();
+      setDoc((prev) => ({ ...prev, pageOrder: nextOrder }));
+    },
+    [pdfDoc, snapshotHistory]
+  );
+
+  // --- Add pages -----------------------------------------------------------------
+  // Inserts real pages copied from uploaded file(s) — a PDF is inserted page for
+  // page, an image becomes a single page (see imageFileToPdfBytes) — in one step
+  // (one Undo takes them all back out) and jumps to the first of them. Like
+  // rotate and delete, nothing in the *opened* PDF is touched until Download:
+  // the pages live in `doc.addedPages` / `addedSources`, are rendered here from
+  // their own source file, and are copied into place when the file is saved.
+  // Returns { ok, message } so the dialog can show why an insert failed instead
+  // of just closing.
+  //   files     File objects the user picked (PDF, PNG or JPEG)
+  //   position  "after" the page being viewed, "start" or "end" of the document
+  const insertPagesFromFiles = useCallback(
+    async ({ files, position }) => {
+      if (!pdfDoc) return { ok: false, message: "Open a PDF first." };
+      if (!files || files.length === 0) return { ok: false, message: "Choose at least one file." };
+      const current = docRef.current;
+
+      let parsedFiles;
+      try {
+        parsedFiles = await Promise.all(
+          files.map(async (file) => {
+            const isImage = /^image\/(png|jpe?g)$/.test(file.type) || /\.(png|jpe?g)$/i.test(file.name);
+            const bytes = isImage ? await imageFileToPdfBytes(file) : await file.arrayBuffer();
+            // .slice(0) keeps a pristine copy for pdf-lib at Download time —
+            // pdf.js's own copy is free to consume/transfer its buffer.
+            const parsed = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+            return { name: file.name, bytes, parsed };
+          })
+        );
+      } catch (err) {
+        console.error("Couldn't read one of the chosen files", err);
+        return { ok: false, message: "Couldn't read one of those files. Make sure they're valid PDFs or images." };
+      }
+
+      const totalNewPages = parsedFiles.reduce((sum, f) => sum + f.parsed.numPages, 0);
+      if (totalNewPages === 0) {
+        return { ok: false, message: "Those files don't have any pages to add." };
+      }
+      if (totalNewPages > MAX_PAGES_PER_ADD) {
+        return { ok: false, message: `That's ${totalNewPages} pages — up to ${MAX_PAGES_PER_ADD} can be added at once.` };
+      }
+
+      const order = orderPages(pdfDoc.numPages, current.addedPages, current.pageOrder);
+      let anchor = position === "start" ? 0 : position === "end" ? order[order.length - 1] : pageNum;
+      let nextId = pdfDoc.numPages + current.addedPages.length + 1;
+
+      const newSources = {};
+      const additions = [];
+      for (const { name, bytes, parsed } of parsedFiles) {
+        const sourceId = `src${nextSourceIdRef.current++}`;
+        newSources[sourceId] = { name, bytes, doc: parsed };
+        for (let i = 0; i < parsed.numPages; i++) {
+          const srcPage = await parsed.getPage(i + 1);
+          const vp = srcPage.getViewport({ scale: 1, rotation: normalizeRotation(srcPage.rotate) });
+          const added = { id: nextId, after: anchor, sourceId, sourcePageIndex: i, width: vp.width, height: vp.height };
+          additions.push(added);
+          anchor = added.id; // the next one goes right behind this one
+          nextId += 1;
+        }
+      }
+
+      snapshotHistory();
+      setAddedSources((prev) => ({ ...prev, ...newSources }));
+      setDoc((prev) => ({ ...prev, addedPages: [...prev.addedPages, ...additions] }));
+      setPageNum(additions[0].id);
+      setActiveId(null);
+      setHighlightDraft(null);
+      return { ok: true };
+    },
+    [pdfDoc, pageNum, snapshotHistory]
+  );
+
+  // Undo and Redo can bring the page being viewed back into, or out of, the
+  // document; if it's no longer in it, step to the closest page that is.
+  const prevVisibleRef = useRef(visiblePages);
+  useEffect(() => {
+    const before = prevVisibleRef.current;
+    prevVisibleRef.current = visiblePages;
+    if (visiblePages.length === 0 || visiblePages.includes(pageNum)) return;
+    setPageNum(nearestKeptPage(before, visiblePages, pageNum));
+  }, [visiblePages, pageNum]);
+
+  // The "Page deleted · Undo" snackbar goes away by itself.
+  useEffect(() => {
+    if (!deleteToast) return;
+    const timer = setTimeout(() => setDeleteToast(null), 7000);
+    return () => clearTimeout(timer);
+  }, [deleteToast]);
+
+  // Only offer Undo while that deletion is still the newest step on the undo stack
+  // (doing anything else first would make the button undo something else).
+  const undoStack = undoStackRef.current;
+  const toastUndoable = !!deleteToast && undoStack[undoStack.length - 1] === deleteToast.before;
+
+  const undoDelete = () => {
+    undo();
+    setDeleteToast(null);
+  };
+
+  const toggleSelectMode = () => {
+    setSelectMode((on) => !on);
+    setSelectedPages([]);
+  };
+
+  const toggleSelected = (n) => {
+    setSelectedPages((cur) => (cur.includes(n) ? cur.filter((x) => x !== n) : [...cur, n]));
+  };
+
+  // Dragging a page on a touch screen only works if the list stops scrolling under
+  // the finger, and a touch that has already started can't be re-classified, so the
+  // pages list carries a touchmove handler from the start that cancels scrolling for
+  // as long as a page is held (the same approach the touch highlighter uses).
+  const pageListRef = useCallback((el) => {
+    if (!el || el.dataset.reorderGuard) return;
+    el.dataset.reorderGuard = "1";
+    el.addEventListener(
+      "touchmove",
+      (e) => {
+        if (reorderGestureRef.current && reorderGestureRef.current.isActive() && e.cancelable) e.preventDefault();
+      },
+      { passive: false }
+    );
+  }, []);
+
+  // Start of a press on a thumbnail (viaGrip = false) or on its grip (viaGrip = true).
+  const beginPageSort = (e, pageId, viaGrip) => {
+    if (!e.isPrimary || e.button !== 0 || selectMode || visiblePages.length < 2) return;
+    const list = e.currentTarget.closest("[data-page-list]");
+    if (!list) return;
+    if (reorderGestureRef.current) reorderGestureRef.current.cancel();
+    const gesture = startPageReorder({
+      pointer: { pointerId: e.pointerId, pointerType: e.pointerType, clientX: e.clientX, clientY: e.clientY },
+      list,
+      pageId,
+      viaGrip,
+      onStart: () => setPageSort({ id: pageId, to: null, lineY: null }),
+      onMove: ({ target, lineY }) =>
+        setPageSort((cur) => (!cur || (cur.to === target && cur.lineY === lineY) ? cur : { ...cur, to: target, lineY })),
+      onDrop: (to) => movePage(pageId, to),
+      onEnd: (moved) => {
+        if (reorderGestureRef.current === gesture) reorderGestureRef.current = null;
+        setPageSort(null);
+        if (moved) {
+          justSortedRef.current = true;
+          setTimeout(() => {
+            justSortedRef.current = false;
+          }, 150);
+        }
+      },
+    });
+    reorderGestureRef.current = gesture;
+  };
+
+  // Keyboard (and screen reader) route to the same thing: with the grip focused,
+  // Up / Down move the page one place.
+  const handleGripKeyDown = (e, pageId, index) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const to = index + (e.key === "ArrowUp" ? -1 : 1);
+    if (to < 0 || to >= visiblePages.length) return;
+    const list = e.currentTarget.closest("[data-page-list]");
+    movePage(pageId, to);
+    // Moving a node in the DOM can drop keyboard focus; hand it back once the list has re-rendered.
+    requestAnimationFrame(() => {
+      const grip = list && list.querySelector(`[data-page-grip="${pageId}"]`);
+      if (grip) grip.focus();
+    });
+  };
+
+  // Don't leave a half-finished drag (and its listeners) behind if the list goes away.
+  useEffect(
+    () => () => {
+      if (reorderGestureRef.current) reorderGestureRef.current.cancel();
+    },
+    []
   );
 
   // Drops a text box that was never filled in. Unlike removeField this is
@@ -1880,6 +2785,23 @@ export default function PdfFillerApp() {
         }
         return fontCache[key];
       };
+      // Pages added in the editor are tacked on after the file's own, in id
+      // order (which is also the order they were made), so page N is
+      // pages[N - 1] whether it came from the file or was added here. Where
+      // each one really sits is settled when the document is saved, below.
+      // Each one is copied — real content, not a blank sheet — out of the file
+      // it was uploaded from; a source used by more than one added page (a
+      // multi-page PDF that was inserted) is only loaded into pdf-lib once.
+      const srcDocCache = {};
+      for (const added of [...addedPages].sort((a, b) => a.id - b.id)) {
+        const source = addedSources[added.sourceId];
+        if (!source) continue; // shouldn't happen, but don't let a missing source break the export
+        if (!srcDocCache[added.sourceId]) {
+          srcDocCache[added.sourceId] = await PDFDocument.load(source.bytes);
+        }
+        const [copied] = await pdf.copyPages(srcDocCache[added.sourceId], [added.sourcePageIndex]);
+        pdf.addPage(copied);
+      }
       const pages = pdf.getPages();
 
       // A page is shown turned by its own /Rotate plus any turn added here, and
@@ -1895,10 +2817,13 @@ export default function PdfFillerApp() {
         return makePageFrame(page, shown);
       });
 
+      // Pages deleted in the editor are dropped at the very end (see below), so
+      // nothing is drawn on them here; the loops skip anything placed on them.
+
       // Highlights go down first, as translucent rectangles under everything
       // else, so the page's own text (and any edits made to it) stay legible
       // on top of the marker color.
-      for (const hl of highlights) {
+      for (const hl of highlights.filter(onKeptPage)) {
         const page = pages[hl.page - 1];
         if (!page) continue;
         const frame = frames[hl.page - 1];
@@ -1921,7 +2846,7 @@ export default function PdfFillerApp() {
       // Edited text is baked in next, as if it were part of the page's own
       // content: cover the original run with a solid rectangle, then draw
       // the replacement text on top of it.
-      for (const edit of textEdits) {
+      for (const edit of textEdits.filter(onKeptPage)) {
         const page = pages[edit.page - 1];
         if (!page) continue;
         const frame = frames[edit.page - 1];
@@ -1961,7 +2886,7 @@ export default function PdfFillerApp() {
         }
       }
 
-      for (const field of fields) {
+      for (const field of fields.filter(onKeptPage)) {
         if (!field.text.trim()) continue;
         const page = pages[field.page - 1];
         if (!page) continue;
@@ -1994,7 +2919,7 @@ export default function PdfFillerApp() {
         }
       }
 
-      for (const sig of signatures) {
+      for (const sig of signatures.filter(onKeptPage)) {
         const page = pages[sig.page - 1];
         if (!page) continue;
         const frame = frames[sig.page - 1];
@@ -2010,7 +2935,7 @@ export default function PdfFillerApp() {
         page.drawImage(pngImage, { ...frame.place(x, y), width: drawWidth, height: drawHeight });
       }
 
-      for (const imgItem of images) {
+      for (const imgItem of images.filter(onKeptPage)) {
         const page = pages[imgItem.page - 1];
         if (!page) continue;
         try {
@@ -2039,6 +2964,39 @@ export default function PdfFillerApp() {
         }
       }
 
+      // Page numbers go on after everything the person placed, but under the
+      // watermark.
+      if (pageNumbers.enabled) {
+        const pnFont = await getFont("Helvetica", false, false);
+        const { r, g, b } = hexToRgb01(pageNumbers.color);
+        const spot = PAGE_NUMBER_POSITIONS.find((p) => p.id === pageNumbers.position) || DEFAULT_PAGE_NUMBER_POSITION;
+        const pnSize = pageNumbers.fontSize;
+
+        for (const [pageIdx, page] of pages.entries()) {
+          const label = pageNumberText(pageLabel(pageIdx + 1)); // null on deleted pages
+          if (!label) continue;
+          const { width, height } = frames[pageIdx];
+          const textWidth = pnFont.widthOfTextAtSize(label, pnSize);
+          const x =
+            spot.h === "left"
+              ? PAGE_NUMBER_MARGIN_PT
+              : spot.h === "right"
+              ? width - PAGE_NUMBER_MARGIN_PT - textWidth
+              : (width - textWidth) / 2;
+          const y =
+            spot.v === "top"
+              ? height - PAGE_NUMBER_MARGIN_PT - HELVETICA_DIGIT_HEIGHT * pnSize
+              : PAGE_NUMBER_MARGIN_PT;
+
+          page.drawText(label, {
+            ...frames[pageIdx].place(x, y),
+            size: pnSize,
+            font: pnFont,
+            color: rgb(r, g, b),
+          });
+        }
+      }
+
       // Watermark goes on last, on top of everything else, on every page.
       if (watermark.enabled && watermark.text.trim()) {
         const wmFont = await getFont("Helvetica", false, false);
@@ -2047,6 +3005,7 @@ export default function PdfFillerApp() {
         const wmSize = watermark.fontSize;
 
         for (const [pageIdx, page] of pages.entries()) {
+          if (deletedSet.has(pageIdx + 1)) continue;
           const frame = frames[pageIdx];
           const { width, height } = frame;
           const textWidth = wmFont.widthOfTextAtSize(wmText, wmSize);
@@ -2065,7 +3024,13 @@ export default function PdfFillerApp() {
         }
       }
 
-      const outBytes = await pdf.save();
+      let outBytes = await pdf.save();
+      // Keep the pages that are left, in the order they're shown: this is what
+      // drops deleted pages, puts added ones where they were placed and applies
+      // any drag-and-drop reordering.
+      if (deletedSet.size > 0 || addedPages.length > 0 || pageOrder !== null) {
+        outBytes = await arrangePages(outBytes, visiblePages.map((n) => n - 1));
+      }
       const outFileName = `${fileName || "document"}-filled.pdf`;
       const dataUrl = bytesToDownloadableDataUrl(outBytes, "application/pdf", outFileName);
       const a = document.createElement("a");
@@ -2087,6 +3052,12 @@ export default function PdfFillerApp() {
   const imagesOnPage = images.filter((im) => im.page === pageNum);
   const textEditsOnPage = textEdits.filter((t) => t.page === pageNum);
   const highlightsOnPage = highlights.filter((h) => h.page === pageNum);
+  // What the Elements list shows: everything except what sits on deleted pages.
+  const liveFields = fields.filter(onKeptPage);
+  const liveSignatures = signatures.filter(onKeptPage);
+  const liveImages = images.filter(onKeptPage);
+  const liveTextEdits = textEdits.filter(onKeptPage);
+  const liveHighlights = highlights.filter(onKeptPage);
   // Edited text sizes are in PDF points (that's what the export uses), but the
   // page is drawn at several screen pixels per point. Derived from the canvas
   // size itself so it stays in step with the page while a zoom is re-rendering.
@@ -2112,50 +3083,199 @@ export default function PdfFillerApp() {
 
   // --- Shared pieces reused by both the desktop rail/sidebar and the ---------
   // --- mobile drawer/bottom-sheet, so we don't maintain two copies of them --
-  const renderPagesList = (afterSelect) => (
-    <div className="p-3 space-y-3">
-      {Array.from({ length: numPages }).map((_, i) => {
-        const n = i + 1;
-        const thumb = thumbnails[i];
-        return (
-          <button
-            key={n}
-            onClick={() => {
-              setPageNum(n);
-              if (afterSelect) afterSelect();
-            }}
-            className={`w-full rounded-md border overflow-hidden text-left block ${
-              pageNum === n ? "border-blue-500 ring-2 ring-blue-200" : "border-neutral-200 hover:border-neutral-300"
-            }`}
-          >
-            {thumb ? (
-              <img src={thumb} alt={`Page ${n}`} className="w-full block" />
-            ) : (
-              <div className="aspect-[3/4] bg-neutral-100 flex items-center justify-center text-xs text-neutral-400">
-                Page {n}
-              </div>
-            )}
-            <div
-              className={`text-center text-xs py-1 ${
-                pageNum === n ? "bg-blue-50 text-blue-700 font-medium" : "text-neutral-500"
-              }`}
+  const renderPagesList = (afterSelect) => {
+    // Selection can hold pages that Undo/Redo has since put back or removed.
+    const selectedLive = selectedPages.filter((n) => visiblePages.includes(n));
+    const canDelete = visiblePages.length > 1;
+    const canReorder = canDelete && !selectMode;
+    const allSelected = selectedLive.length >= visiblePages.length;
+
+    const deleteSelected = () => {
+      if (selectedLive.length === 0 || allSelected) return;
+      deletePages(selectedLive);
+      setSelectedPages([]);
+      setSelectMode(false);
+    };
+
+    return (
+      <div className="p-3 space-y-3">
+        {(canDelete || selectMode) && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-neutral-500">
+              {selectMode ? `${selectedLive.length} selected` : `${visiblePages.length} pages`}
+            </span>
+            <button
+              type="button"
+              onClick={toggleSelectMode}
+              className="min-h-[44px] px-3 -mr-3 text-sm font-medium text-blue-600 touch-manipulation"
             >
-              {n}
-            </div>
+              {selectMode ? "Done" : "Select"}
+            </button>
+          </div>
+        )}
+
+        {canReorder && (
+          <p className="text-[11px] leading-snug text-neutral-400 -mt-1">
+            To reorder, drag a page by its handle. On a touch screen you can also press and hold a page, then drag.
+          </p>
+        )}
+
+        {/* Only the thumbnails live in here: reordering measures this list, and the
+            drop line is positioned against it. */}
+        <div ref={pageListRef} data-page-list className="relative">
+          <div className="space-y-3">
+            {visiblePages.map((n, i) => {
+              const label = i + 1; // the page's number in the downloaded PDF
+              const thumb = thumbnails[n];
+              const added = addedById.get(n); // set for a page inserted via "Add pages", before its thumbnail is ready
+              const turnedSideways = (rotations[n] || 0) % 180 !== 0;
+              const isSelected = selectedLive.includes(n);
+              const highlighted = selectMode ? isSelected : pageNum === n;
+              const held = pageSort !== null && pageSort.id === n; // being dragged right now
+              return (
+                <div
+                  key={n}
+                  data-page-item={n}
+                  style={NO_CALLOUT_STYLE}
+                  // Android's long-press menu would otherwise open on top of a page being picked up.
+                  onContextMenu={(e) => {
+                    if (reorderGestureRef.current) e.preventDefault();
+                  }}
+                  onDragStart={(e) => e.preventDefault()}
+                  className={`relative rounded-md select-none ${held ? "z-20 shadow-xl ring-2 ring-blue-400 opacity-90" : ""}`}
+                >
+                  <button
+                    onClick={() => {
+                      if (justSortedRef.current) return; // that was the end of a drag, not a tap
+                      if (selectMode) {
+                        toggleSelected(n);
+                        return;
+                      }
+                      setPageNum(n);
+                      if (afterSelect) afterSelect();
+                    }}
+                    onPointerDown={(e) => beginPageSort(e, n, false)}
+                    aria-pressed={selectMode ? isSelected : undefined}
+                    className={`w-full rounded-md border overflow-hidden text-left block touch-manipulation ${
+                      highlighted ? "border-blue-500 ring-2 ring-blue-200" : "border-neutral-200 hover:border-neutral-300"
+                    }`}
+                  >
+                    {thumb ? (
+                      <img src={thumb} alt={`Page ${label}`} draggable={false} className="w-full block" />
+                    ) : (
+                      <div
+                        className="w-full bg-neutral-100 flex items-center justify-center text-xs text-neutral-400"
+                        style={
+                          added
+                            ? { aspectRatio: turnedSideways ? `${added.height} / ${added.width}` : `${added.width} / ${added.height}` }
+                            : { aspectRatio: "3 / 4" }
+                        }
+                      >
+                        Page {label}
+                      </div>
+                    )}
+                    <div
+                      className={`text-center text-xs py-1 ${
+                        highlighted ? "bg-blue-50 text-blue-700 font-medium" : "text-neutral-500"
+                      }`}
+                    >
+                      {label}
+                    </div>
+                  </button>
+
+                  {/* Tap targets sit beside the thumbnail button rather than inside it (a
+                      button can't hold a button), and stay visible — there's no hover on touch. */}
+                  {selectMode ? (
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none absolute top-2 left-2 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold ${
+                        isSelected ? "bg-blue-600 border-blue-600 text-white" : "bg-white/90 border-neutral-400"
+                      }`}
+                    >
+                      {isSelected ? "✓" : ""}
+                    </span>
+                  ) : (
+                    <>
+                      {canReorder && (
+                        <button
+                          type="button"
+                          data-page-grip={n}
+                          onPointerDown={(e) => beginPageSort(e, n, true)}
+                          onKeyDown={(e) => handleGripKeyDown(e, n, i)}
+                          onContextMenu={(e) => e.preventDefault()}
+                          aria-label={`Move page ${label}. Drag it, or use the up and down arrow keys.`}
+                          title="Drag to reorder"
+                          className="absolute top-1.5 left-1.5 w-10 h-10 rounded-full bg-white/95 border border-neutral-200 shadow text-neutral-500 flex items-center justify-center touch-none select-none cursor-grab active:cursor-grabbing"
+                        >
+                          <GripIcon />
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => deletePages(n)}
+                          aria-label={`Delete page ${label}`}
+                          title="Delete page"
+                          className="absolute top-1.5 right-1.5 w-10 h-10 rounded-full bg-white/95 border border-neutral-200 shadow text-red-600 flex items-center justify-center active:bg-red-50 touch-manipulation"
+                        >
+                          <TrashIcon />
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Where the held page will land. */}
+          {pageSort && pageSort.lineY !== null && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute left-0 right-0 z-30 h-1 -mt-0.5 rounded-full bg-blue-500"
+              style={{ top: pageSort.lineY }}
+            />
+          )}
+        </div>
+
+        {!selectMode && (
+          <button
+            type="button"
+            onClick={() => setShowAddPages(true)}
+            className="w-full min-h-[44px] rounded-md border border-dashed border-neutral-300 text-sm font-medium text-neutral-600 hover:bg-neutral-50 hover:border-neutral-400 flex items-center justify-center gap-1.5 touch-manipulation"
+          >
+            <AddPageIcon />
+            Add pages
           </button>
-        );
-      })}
-    </div>
-  );
+        )}
+
+        {selectMode && (
+          <div className="sticky bottom-0 -mx-3 -mb-3 px-3 py-3 bg-white border-t border-neutral-200">
+            <button
+              type="button"
+              onClick={deleteSelected}
+              disabled={selectedLive.length === 0 || allSelected}
+              className="w-full min-h-[44px] rounded-lg bg-red-600 text-white text-sm font-medium active:bg-red-700 disabled:opacity-40 touch-manipulation"
+            >
+              {selectedLive.length === 0
+                ? "Select pages to delete"
+                : `Delete ${selectedLive.length} ${selectedLive.length === 1 ? "page" : "pages"}`}
+            </button>
+            {selectedLive.length > 0 && allSelected && (
+              <p className="mt-2 text-xs text-neutral-500 text-center">Keep at least one page.</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderInspectorContent = () => (
     <>
-      <h2 className="text-sm font-semibold mb-2">Elements</h2>
+      <h2 className="text-sm font-semibold mb-2">History</h2>
+      
       <p className="text-xs text-neutral-500 mb-4">
-        Pick "Text" and click the page to drop a field, use "Edit Text" and
-        click existing text on the page to change it, or use "Signature" /
-        "Image" and click where you want it placed. Tap an element on the
-        page to reveal its controls and style it below.
+        This section only includes text, images, signatures and highlights.
       </p>
 
       {activeField && (
@@ -2358,14 +3478,14 @@ export default function PdfFillerApp() {
         </div>
       )}
 
-      {fields.length === 0 &&
-        signatures.length === 0 &&
-        images.length === 0 &&
-        textEdits.length === 0 &&
-        highlights.length === 0 && <p className="text-sm text-neutral-400">Nothing added yet.</p>}
+      {liveFields.length === 0 &&
+        liveSignatures.length === 0 &&
+        liveImages.length === 0 &&
+        liveTextEdits.length === 0 &&
+        liveHighlights.length === 0 && <p className="text-sm text-neutral-400">Nothing added yet.</p>}
 
       <ul className="space-y-2">
-        {fields.map((f) => (
+        {liveFields.map((f) => (
           <li
             key={f.id}
             onClick={() => {
@@ -2388,7 +3508,7 @@ export default function PdfFillerApp() {
                 {f.text || "(empty)"}
               </div>
               <div className="text-xs text-neutral-400">
-                Page {f.page} · {f.fontSize}px · {FONT_FAMILIES.find((x) => x.id === f.fontFamily)?.label}
+                Page {pageLabel(f.page)} · {f.fontSize}px · {FONT_FAMILIES.find((x) => x.id === f.fontFamily)?.label}
               </div>
             </div>
             <span className="w-4 h-4 rounded-full border border-neutral-300 shrink-0" style={{ backgroundColor: f.color }} />
@@ -2396,11 +3516,11 @@ export default function PdfFillerApp() {
         ))}
       </ul>
 
-      {textEdits.length > 0 && (
+      {liveTextEdits.length > 0 && (
         <>
           <h2 className="text-sm font-semibold mt-5 mb-2">Edited text</h2>
           <ul className="space-y-2">
-            {textEdits.map((t) => (
+            {liveTextEdits.map((t) => (
               <li
                 key={t.id}
                 onClick={() => {
@@ -2414,7 +3534,7 @@ export default function PdfFillerApp() {
                 <div className="min-w-0">
                   <div className="truncate font-medium">{t.text || "(empty)"}</div>
                   <div className="text-xs text-neutral-400 truncate">
-                    Page {t.page} · was "{t.originalText}"
+                    Page {pageLabel(t.page)} · was "{t.originalText}"
                   </div>
                 </div>
                 <button
@@ -2434,11 +3554,11 @@ export default function PdfFillerApp() {
         </>
       )}
 
-      {signatures.length > 0 && (
+      {liveSignatures.length > 0 && (
         <>
           <h2 className="text-sm font-semibold mt-5 mb-2">Signatures</h2>
           <ul className="space-y-2">
-            {signatures.map((s) => (
+            {liveSignatures.map((s) => (
               <li
                 key={s.id}
                 onClick={() => {
@@ -2451,7 +3571,7 @@ export default function PdfFillerApp() {
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <img src={s.dataUrl} alt="Signature" className="h-6 w-auto shrink-0" />
-                  <span className="text-xs text-neutral-400">Page {s.page}</span>
+                  <span className="text-xs text-neutral-400">Page {pageLabel(s.page)}</span>
                 </div>
                 <button
                   onClick={(e) => {
@@ -2469,11 +3589,11 @@ export default function PdfFillerApp() {
         </>
       )}
 
-      {images.length > 0 && (
+      {liveImages.length > 0 && (
         <>
           <h2 className="text-sm font-semibold mt-5 mb-2">Images</h2>
           <ul className="space-y-2">
-            {images.map((im) => (
+            {liveImages.map((im) => (
               <li
                 key={im.id}
                 onClick={() => {
@@ -2487,7 +3607,7 @@ export default function PdfFillerApp() {
                 <div className="flex items-center gap-2 min-w-0">
                   <img src={im.dataUrl} alt="Inserted" className="h-6 w-auto shrink-0" />
                   <span className="text-xs text-neutral-400">
-                    Page {im.page} · {Math.round(im.rotation || 0)}°
+                    Page {pageLabel(im.page)} · {Math.round(im.rotation || 0)}°
                   </span>
                 </div>
                 <button
@@ -2506,11 +3626,11 @@ export default function PdfFillerApp() {
         </>
       )}
 
-      {highlights.length > 0 && (
+      {liveHighlights.length > 0 && (
         <>
           <h2 className="text-sm font-semibold mt-5 mb-2">Highlights</h2>
           <ul className="space-y-2">
-            {highlights.map((h) => (
+            {liveHighlights.map((h) => (
               <li
                 key={h.id}
                 onClick={() => {
@@ -2530,7 +3650,7 @@ export default function PdfFillerApp() {
                     title="Highlight color"
                     className="w-5 h-5 rounded border border-neutral-300 cursor-pointer p-0 shrink-0"
                   />
-                  <span className="text-xs text-neutral-400 shrink-0">Page {h.page}</span>
+                  <span className="text-xs text-neutral-400 shrink-0">Page {pageLabel(h.page)}</span>
                   <input
                     type="range"
                     min={MIN_HIGHLIGHT_OPACITY}
@@ -2573,7 +3693,7 @@ export default function PdfFillerApp() {
   return (
     <div className="h-screen flex flex-col bg-neutral-50 text-neutral-900 overflow-hidden">
       {/* Top bar */}
-      <header className="bg-slate-900 text-white px-2.5 sm:px-4 py-2.5 flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+      <header className="relative bg-slate-900 text-white px-2.5 sm:px-4 py-2.5 flex items-center gap-1.5 sm:gap-2.5 shrink-0">
         <button
           onClick={() => setMobilePagesOpen(true)}
           disabled={!pdfDoc}
@@ -2734,6 +3854,20 @@ export default function PdfFillerApp() {
           )}
         </div>
 
+        {/* Page numbers: its own button from sm up; on phones it lives in the More menu so the bar doesn't overflow. */}
+        <button
+          onClick={() => setShowPageNumberPanel((v) => !v)}
+          disabled={!pdfDoc}
+          aria-expanded={showPageNumberPanel}
+          className={`hidden sm:flex items-center gap-1.5 p-1.5 lg:px-2.5 rounded text-sm hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent ${
+            pageNumbers.enabled ? "text-blue-400" : ""
+          }`}
+          title="Page numbers"
+        >
+          <PageNumberIcon />
+          <span className="hidden lg:inline">Page numbers</span>
+        </button>
+
         <div className="relative">
           <button
             onClick={() => setShowMoreMenu((v) => !v)}
@@ -2755,11 +3889,170 @@ export default function PdfFillerApp() {
                 >
                   {pdfDoc ? "Replace PDF" : "Upload PDF"}
                 </button>
+                <button
+                  onClick={() => {
+                    setShowMoreMenu(false);
+                    setShowPageNumberPanel(true);
+                  }}
+                  disabled={!pdfDoc}
+                  className="sm:hidden w-full text-left px-3 py-2.5 text-sm hover:bg-neutral-50 disabled:opacity-40"
+                >
+                  Page numbers
+                  {pageNumbers.enabled && <span className="ml-2 text-xs text-blue-600">On</span>}
+                </button>
               </div>
             </>
           )}
         </div>
         <input ref={fileInputRef} type="file" accept="application/pdf" onChange={handleFileChange} className="hidden" />
+
+        {showPageNumberPanel && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setShowPageNumberPanel(false)} />
+            <div
+              role="dialog"
+              aria-label="Page numbers"
+              className="absolute right-2 top-full mt-1 w-72 max-w-[calc(100vw-1rem)] max-h-[calc(100vh-4.5rem)] overflow-y-auto bg-white text-neutral-800 rounded-md shadow-lg border border-neutral-200 p-3 z-40 space-y-2"
+            >
+              <button
+                type="button"
+                role="switch"
+                aria-checked={pageNumbers.enabled}
+                onClick={() => setPageNumbers((p) => ({ ...p, enabled: !p.enabled }))}
+                className="w-full min-h-[44px] flex items-center justify-between text-sm font-medium touch-manipulation"
+              >
+                Page numbers
+                <span
+                  className={`relative w-11 h-6 rounded-full transition-colors ${
+                    pageNumbers.enabled ? "bg-blue-600" : "bg-neutral-300"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                      pageNumbers.enabled ? "translate-x-5" : ""
+                    }`}
+                  />
+                </span>
+              </button>
+
+              <div className={`space-y-3 ${pageNumbers.enabled ? "" : "opacity-50"}`}>
+                <div>
+                  <span className="block text-xs text-neutral-500 mb-1">Position</span>
+                  <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Position">
+                    {PAGE_NUMBER_POSITIONS.map((pos) => {
+                      const on = pageNumbers.position === pos.id;
+                      return (
+                        <button
+                          key={pos.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={on}
+                          aria-label={pos.label}
+                          title={pos.label}
+                          onClick={() => setPageNumbers((p) => ({ ...p, position: pos.id }))}
+                          className={`h-12 rounded border flex items-center justify-center touch-manipulation ${
+                            on
+                              ? "bg-blue-50 text-blue-700 border-blue-400"
+                              : "text-neutral-400 border-neutral-300 active:bg-neutral-50"
+                          }`}
+                        >
+                          <PositionGlyph v={pos.v} h={pos.h} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="page-number-format" className="block text-xs text-neutral-500 mb-1">
+                    Format
+                  </label>
+                  <select
+                    id="page-number-format"
+                    value={pageNumbers.format}
+                    onChange={(e) => setPageNumbers((p) => ({ ...p, format: e.target.value }))}
+                    className="w-full h-11 text-base sm:text-sm border border-neutral-300 rounded px-2 bg-white"
+                  >
+                    {PAGE_NUMBER_FORMATS.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label htmlFor="page-number-start" className="block text-xs text-neutral-500 mb-1">
+                      Start at
+                    </label>
+                    <input
+                      id="page-number-start"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={pageNumbers.startAt}
+                      onChange={(e) => setPageNumbers((p) => ({ ...p, startAt: e.target.value }))}
+                      onBlur={() =>
+                        setPageNumbers((p) => ({ ...p, startAt: String(parsePageNumberStart(p.startAt)) }))
+                      }
+                      className="w-full h-11 text-base sm:text-sm border border-neutral-300 rounded px-2"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="page-number-size" className="block text-xs text-neutral-500 mb-1">
+                      Size
+                    </label>
+                    <select
+                      id="page-number-size"
+                      value={pageNumbers.fontSize}
+                      onChange={(e) => setPageNumbers((p) => ({ ...p, fontSize: Number(e.target.value) }))}
+                      className="w-full h-11 text-base sm:text-sm border border-neutral-300 rounded px-2 bg-white"
+                    >
+                      {PAGE_NUMBER_SIZES.map((size) => (
+                        <option key={size} value={size}>
+                          {size} pt
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="page-number-color" className="block text-xs text-neutral-500 mb-1">
+                    Color
+                  </label>
+                  <input
+                    id="page-number-color"
+                    type="color"
+                    value={pageNumbers.color}
+                    onChange={(e) => setPageNumbers((p) => ({ ...p, color: e.target.value }))}
+                    className="w-full h-11 border border-neutral-300 rounded cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <label className="flex items-center gap-3 min-h-[44px] text-sm touch-manipulation">
+                    <input
+                      type="checkbox"
+                      className="w-5 h-5 shrink-0"
+                      checked={pageNumbers.skipFirst}
+                      onChange={(e) => setPageNumbers((p) => ({ ...p, skipFirst: e.target.checked }))}
+                    />
+                    Don't number the first page
+                  </label>
+                  <p className="text-[11px] text-neutral-400">It still counts, so numbering carries on from the next page.</p>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-neutral-400">
+                {pageNumbers.enabled
+                  ? "Added to every page when you download."
+                  : "Turn on to add numbers when you download."}
+              </p>
+            </div>
+          </>
+        )}
       </header>
 
       {/* Tool row */}
@@ -2836,11 +4129,22 @@ export default function PdfFillerApp() {
           />
 
           <div className="flex items-center gap-1 pl-1.5 ml-0.5 border-l border-neutral-200 shrink-0">
+            <ToolButton title="Add page" onClick={() => setShowAddPages(true)}>
+              <AddPageIcon />
+            </ToolButton>
             <ToolButton title="Rotate left" onClick={() => rotatePages(pageNum, -90)}>
               <RotateLeftIcon />
             </ToolButton>
             <ToolButton title="Rotate right" onClick={() => rotatePages(pageNum, 90)}>
               <RotateRightIcon />
+            </ToolButton>
+            <ToolButton
+              title="Delete page"
+              danger
+              disabled={visiblePages.length <= 1}
+              onClick={() => deletePages(pageNum)}
+            >
+              <TrashIcon />
             </ToolButton>
           </div>
 
@@ -3028,6 +4332,39 @@ export default function PdfFillerApp() {
                     </span>
                   </div>
                 )}
+                {(() => {
+                  // Preview of the page number, sized and placed the way the
+                  // export will (points -> screen px via pxPerPt).
+                  const label = pageNumberText(pagePosition);
+                  if (!label) return null;
+                  const spot =
+                    PAGE_NUMBER_POSITIONS.find((p) => p.id === pageNumbers.position) || DEFAULT_PAGE_NUMBER_POSITION;
+                  const size = pageNumbers.fontSize * pxPerPt;
+                  const edge = PAGE_NUMBER_MARGIN_PT * pxPerPt;
+                  // With line-height 1, Helvetica's digits sit about 13% down from
+                  // the top of the box and 15% up from the bottom, so the box is
+                  // pulled out by that much to put the digits `edge` from the page.
+                  const style = {
+                    position: "absolute",
+                    pointerEvents: "none",
+                    whiteSpace: "nowrap",
+                    lineHeight: 1,
+                    fontSize: `${size}px`,
+                    fontFamily: "Helvetica, Arial, sans-serif",
+                    color: pageNumbers.color,
+                    ...(spot.v === "top" ? { top: edge - 0.13 * size } : { bottom: edge - 0.15 * size }),
+                    ...(spot.h === "left"
+                      ? { left: edge }
+                      : spot.h === "right"
+                      ? { right: edge }
+                      : { left: "50%", transform: "translateX(-50%)" }),
+                  };
+                  return (
+                    <div aria-hidden="true" style={style}>
+                      {label}
+                    </div>
+                  );
+                })()}
 
                 {detectableTextItems.map((item) => (
                   <div
@@ -3520,18 +4857,18 @@ export default function PdfFillerApp() {
             <div className="border-t border-neutral-200 bg-white px-3 sm:px-4 py-2 flex items-center justify-between gap-3 text-sm shrink-0">
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setPageNum((p) => Math.max(1, p - 1))}
-                  disabled={pageNum <= 1}
+                  onClick={() => setPageNum(visiblePages[pagePosition - 2] ?? pageNum)}
+                  disabled={pagePosition <= 1}
                   className="p-1.5 rounded border border-neutral-300 disabled:opacity-40"
                 >
                   <ChevronLeftIcon />
                 </button>
                 <span className="text-neutral-600 text-xs sm:text-sm whitespace-nowrap">
-                  Page {pageNum} / {numPages}
+                  Page {pagePosition} / {visiblePages.length}
                 </span>
                 <button
-                  onClick={() => setPageNum((p) => Math.min(numPages, p + 1))}
-                  disabled={pageNum >= numPages}
+                  onClick={() => setPageNum(visiblePages[pagePosition] ?? pageNum)}
+                  disabled={pagePosition >= visiblePages.length}
                   className="p-1.5 rounded border border-neutral-300 disabled:opacity-40"
                 >
                   <ChevronRightIcon />
@@ -3596,8 +4933,40 @@ export default function PdfFillerApp() {
         </div>
       )}
 
+      {/* Snackbar after deleting pages: big Undo target, clear of the bottom bar and the home indicator */}
+      {toastUndoable && (
+        <div
+          className="fixed inset-x-0 z-50 flex justify-center px-3 pointer-events-none"
+          style={{ bottom: "calc(4.5rem + env(safe-area-inset-bottom, 0px))" }}
+        >
+          <div
+            role="status"
+            className="pointer-events-auto flex items-center gap-2 max-w-full bg-slate-900 text-white text-sm rounded-xl shadow-lg pl-4 pr-1.5 py-1.5"
+          >
+            <span className="truncate">
+              {deleteToast.count === 1 ? "Page deleted" : `${deleteToast.count} pages deleted`}
+            </span>
+            <button
+              type="button"
+              onClick={undoDelete}
+              className="min-h-[44px] px-4 rounded-lg text-blue-300 font-semibold active:bg-white/10 touch-manipulation"
+            >
+              Undo
+            </button>
+          </div>
+        </div>
+      )}
+
       {showSignaturePad && (
         <SignaturePad onSave={handleSaveSignature} onClose={() => setShowSignaturePad(false)} />
+      )}
+
+      {showAddPages && (
+        <AddPagesDialog
+          currentPageLabel={pagePosition}
+          onAdd={insertPagesFromFiles}
+          onClose={() => setShowAddPages(false)}
+        />
       )}
     </div>
   );
