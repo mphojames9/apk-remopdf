@@ -201,7 +201,8 @@ const toolsList = [
   { id: 'qr-scanner', title: 'QR Scanner', image: image15, action: () => { setIsQrScannerModalOpen(true); setQrResult(''); } },
   { id: 'open-workspace', title: 'Open Workspace', image: image17, action: () => navigate('/Workspace') },
   { id: 'qr-generator', title: 'QR Generator', image: image16, action: () => setIsQrGeneratorModalOpen(true) },
-  { id: 'extract-zip', title: 'Extract ZIP', image: image18, action: () => navigate('/ZipTool') }
+  { id: 'extract-zip', title: 'Extract ZIP', image: image18, action: () => navigate('/ZipTool') },
+  { id: 'invoice-builder', title: 'Invoice Builder', icon: 'fa-file-invoice-dollar', action: () => navigate('/InvoiceBuilder') }
 ];
 
 const toolCategories = [
@@ -216,6 +217,11 @@ const toolCategories = [
     ids: ['open-workspace'],
     featured: true,
     description: 'Edit and manage your PDFs in one place', // reword as you like
+  },
+  {
+    name: 'Business',
+    icon: 'fa-file-invoice-dollar',
+    ids: ['invoice-builder'],
   },
   {
     name: 'Organize',
@@ -996,7 +1002,11 @@ useEffect(() => {
             <span className="pointer-events-none absolute -top-10 -right-10 w-32 h-32 rounded-full bg-[#FF4B5C]/0 group-hover:bg-[#FF4B5C]/10 blur-2xl transition-colors duration-300"></span>
 
             <div className="relative w-16 h-16 bg-gradient-to-b from-slate-50 to-slate-100 border border-slate-200/70 group-hover:border-[#FF4B5C]/40 rounded-[18px] flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105 group-hover:-rotate-3">
-              <img src={tool.image} alt="" className="w-9 h-9 object-contain" />
+              {tool.image ? (
+                <img src={tool.image} alt="" className="w-9 h-9 object-contain" />
+              ) : (
+                <i className={`fa-solid ${tool.icon} text-2xl text-[#FF4B5C]`}></i>
+              )}
             </div>
 
             <div className="relative flex-1 min-w-0">
@@ -1022,7 +1032,11 @@ useEffect(() => {
               <div
                 className={`relative w-16 h-16 ${tool.bgColor || 'bg-gradient-to-b from-slate-50 to-slate-100'} border border-slate-200/70 group-hover:border-[#FF4B5C]/40 rounded-[18px] flex items-center justify-center mb-3 transition-transform duration-200 group-hover:scale-105 group-hover:-rotate-3 group-active:scale-90`}
               >
-                <img src={tool.image} alt="" className="w-9 h-9 object-contain" />
+                {tool.image ? (
+                  <img src={tool.image} alt="" className="w-9 h-9 object-contain" />
+                ) : (
+                  <i className={`fa-solid ${tool.icon} text-2xl text-[#FF4B5C]`}></i>
+                )}
               </div>
 
               <h3 className="relative font-bold text-[13px] text-slate-900 leading-tight">

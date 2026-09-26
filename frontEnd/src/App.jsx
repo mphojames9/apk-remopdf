@@ -13,6 +13,7 @@ import axios from 'axios'; // Add this line
 import PremiumFooter from './components/PremiumFooter';
 import ResumeHeader from './components/ResumeWelcomeHeader';
 import WhyChooseUs from './components/WhyChooseUs';
+const InvoiceBuilder = React.lazy(() => import('./pages/InvoiceBuilder'));
 
 // High-Performance Lazy Loading for Viewports
 const Home = React.lazy(() => import('./pages/Home'));
@@ -246,7 +247,8 @@ const MainLayout = () => {
             <Route path="/about" element={<AboutUs />} />
             <Route path="/terms-of-use" element={<Terms />} />
             <Route path="/ZipTool" element={<ZipTool />} />
-            
+            <Route path="/InvoiceBuilder" element={<InvoiceBuilder />} />
+
             {/* Dynamic Fallback Redirection (404 Page) */}
             <Route path="*" element={
               <div className="min-h-[80vh] flex items-center justify-center bg-slate-50 p-4 font-sans selection:bg-amber-100 selection:text-amber-900 animate-in fade-in duration-700">
